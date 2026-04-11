@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const db = require('./database');
 const { S3Client, HeadBucketCommand } = require('@aws-sdk/client-s3');
+const { encrypt, decrypt } = require('./crypto-util');
 
 const app = express();
 app.use(cors());
@@ -30,7 +31,7 @@ app.get('/api/agents/:id/jobs', (req, res) => {
     LEFT JOIN destinations d ON j.destination_id = d.id 
     WHERE j.agent_id = ?
   `).all(req.params.id);
-  res.json(jobs);
+  res.json(jobs.map(j => ({ ...j, dest_config: j.dest_config ? decrypt(j.dest_config) : null })));
 });
 
 app.post('/api/jobs', (req, res) => {
@@ -57,13 +58,13 @@ app.get('/api/history', (req, res) => {
 // Destinations API
 app.get('/api/destinations', (req, res) => {
   const destinations = db.prepare('SELECT * FROM destinations').all();
-  res.json(destinations.map(d => ({ ...d, config: JSON.parse(d.config) })));
+  res.json(destinations.map(d => ({ ...d, config: JSON.parse(decrypt(d.config)) })));
 });
 
 app.post('/api/destinations', (req, res) => {
   const { id, name, type, config } = req.body;
   const stmt = db.prepare(`INSERT INTO destinations (id, name, type, config) VALUES (?, ?, ?, ?)`);
-  stmt.run(id, name, type, JSON.stringify(config));
+  stmt.run(id, name, type, encrypt(JSON.stringify(config)));
   res.status(201).json({ success: true });
 });
 
