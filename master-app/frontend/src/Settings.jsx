@@ -38,11 +38,35 @@ export default function Settings() {
   const [sslLogs, setSslLogs] = useState('');
   const logsRef = useRef(null);
 
-  useEffect(() => { fetchSettings(); }, []);
+  // Update & Recovery state
+  const [updateStatus, setUpdateStatus] = useState(null);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateLogs, setUpdateLogs] = useState('');
+  const [updateLogsVisible, setUpdateLogsVisible] = useState(false);
+  const updateLogsRef = useRef(null);
+
+  const [backups, setBackups] = useState([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [snapshotting, setSnapshotting] = useState(false);
+  const [snapshotMsg, setSnapshotMsg] = useState(null);
+
+  const [rollbackTarget, setRollbackTarget] = useState(null);
+  const [rollbackLogs, setRollbackLogs] = useState('');
+  const rollbackLogsRef = useRef(null);
+
+  useEffect(() => { fetchSettings(); fetchUpdateStatus(); fetchBackups(); }, []);
 
   useEffect(() => {
     if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight;
   }, [sslLogs]);
+
+  useEffect(() => {
+    if (updateLogsRef.current) updateLogsRef.current.scrollTop = updateLogsRef.current.scrollHeight;
+  }, [updateLogs]);
+
+  useEffect(() => {
+    if (rollbackLogsRef.current) rollbackLogsRef.current.scrollTop = rollbackLogsRef.current.scrollHeight;
+  }, [rollbackLogs]);
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -58,6 +82,22 @@ export default function Settings() {
     setLoading(false);
   };
 
+  const fetchUpdateStatus = async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/update/status`);
+      if (res.ok) setUpdateStatus(await res.json());
+    } catch (e) {}
+  };
+
+  const fetchBackups = async () => {
+    setBackupsLoading(true);
+    try {
+      const res = await apiFetch(`${API_URL}/update/backups`);
+      if (res.ok) setBackups(await res.json());
+    } catch (e) {}
+    setBackupsLoading(false);
+  };
+
   const saveDomain = async (e) => {
     e.preventDefault();
     setDomainSaving(true);
@@ -69,7 +109,6 @@ export default function Settings() {
         body: JSON.stringify({ domain })
       });
       if (res.ok) {
-        // Save email too
         await apiFetch(`${API_URL}/settings/email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -112,6 +151,89 @@ export default function Settings() {
     }
     setSslLoading(false);
   };
+
+  const applyUpdate = async () => {
+    if (!window.confirm('This will pull the latest code from GitHub and rebuild the Docker containers.\n\nA database snapshot will be created automatically before updating.\n\nContinue?')) return;
+    setUpdateLoading(true);
+    setUpdateLogs('');
+    setUpdateLogsVisible(true);
+
+    try {
+      const token = localStorage.getItem('aegissight_token');
+      const response = await fetch(`${API_URL}/update/apply`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+      });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        setUpdateLogs(prev => prev + decoder.decode(value));
+      }
+      fetchUpdateStatus();
+      fetchBackups();
+      fetchSettings();
+    } catch (e) {
+      setUpdateLogs(prev => prev + `\nError: ${e.message}`);
+    }
+    setUpdateLoading(false);
+  };
+
+  const takeSnapshot = async () => {
+    setSnapshotting(true);
+    setSnapshotMsg(null);
+    try {
+      const res = await apiFetch(`${API_URL}/update/snapshot`, { method: 'POST' });
+      if (res.ok) {
+        const d = await res.json();
+        setSnapshotMsg({ ok: true, text: `Snapshot created: ${d.filename}` });
+        fetchBackups();
+      } else {
+        const d = await res.json();
+        setSnapshotMsg({ ok: false, text: d.error });
+      }
+    } catch (e) {
+      setSnapshotMsg({ ok: false, text: 'Snapshot failed.' });
+    }
+    setSnapshotting(false);
+  };
+
+  const rollback = async (filename) => {
+    if (!window.confirm(`Roll back database to snapshot:\n${filename}\n\nYour current database will be saved as a safety snapshot first.\n\nContinue?`)) return;
+    setRollbackTarget(filename);
+    setRollbackLogs('');
+
+    try {
+      const token = localStorage.getItem('aegissight_token');
+      const response = await fetch(`${API_URL}/update/rollback`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename })
+      });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        setRollbackLogs(prev => prev + decoder.decode(value));
+      }
+      fetchBackups();
+    } catch (e) {
+      setRollbackLogs(prev => prev + `\nError: ${e.message}`);
+    }
+    setRollbackTarget(null);
+  };
+
+  const formatBytes = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1048576).toFixed(1)} MB`;
+  };
+
+  const formatDate = (iso) => new Date(iso).toLocaleString();
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px', color: 'var(--text-muted)' }}>
@@ -241,6 +363,194 @@ export default function Settings() {
           </div>
         )}
       </SettingSection>
+
+      {/* ── Updates & Recovery ──────────────────────────────────────── */}
+      <SettingSection
+        icon={<span style={{ fontSize: '20px' }}>🚀</span>}
+        title="Updates & Recovery"
+      >
+        {/* Version status banner */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+          <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Current Version</div>
+            <div style={{ fontWeight: '700', color: 'var(--accent-color)', fontSize: '1.05rem' }}>
+              v{updateStatus?.currentVersion || settings.app_version || '0.2.0'}
+            </div>
+            {updateStatus?.currentCommit && (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '4px', fontFamily: 'monospace' }}>
+                @ {updateStatus.currentCommit}
+              </div>
+            )}
+          </div>
+
+          {updateStatus?.latestRelease ? (
+            <div style={{ padding: '14px 16px', background: updateStatus.updateAvailable ? 'rgba(102,252,241,0.06)' : 'rgba(16,185,129,0.06)', borderRadius: '10px', border: `1px solid ${updateStatus.updateAvailable ? 'rgba(102,252,241,0.3)' : 'rgba(16,185,129,0.3)'}` }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Latest Release</div>
+              <div style={{ fontWeight: '700', fontSize: '1.05rem', color: updateStatus.updateAvailable ? 'var(--accent-color)' : '#10b981' }}>
+                v{updateStatus.latestRelease.version}
+              </div>
+              {updateStatus.updateAvailable ? (
+                <div style={{ color: 'var(--accent-color)', fontSize: '0.75rem', marginTop: '4px' }}>⬆ Update available</div>
+              ) : (
+                <div style={{ color: '#10b981', fontSize: '0.75rem', marginTop: '4px' }}>✓ Up to date</div>
+              )}
+            </div>
+          ) : (
+            <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>Latest Release</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>GitHub unreachable</div>
+            </div>
+          )}
+
+          <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>DB Snapshots</div>
+            <div style={{ fontWeight: '700', fontSize: '1.05rem' }}>{backups.length}</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '4px' }}>total backups stored</div>
+          </div>
+        </div>
+
+        {/* Release notes */}
+        {updateStatus?.latestRelease?.body && (
+          <div style={{ marginBottom: '20px', padding: '14px 16px', background: 'rgba(102,252,241,0.05)', border: '1px solid rgba(102,252,241,0.15)', borderRadius: '10px' }}>
+            <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-color)', marginBottom: '8px' }}>
+              Release Notes — v{updateStatus.latestRelease.version}
+            </div>
+            <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'pre-wrap', lineHeight: '1.6', fontFamily: 'inherit' }}>
+              {updateStatus.latestRelease.body.slice(0, 600)}{updateStatus.latestRelease.body.length > 600 ? '…' : ''}
+            </pre>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '20px' }}>
+          <button
+            className="btn-primary"
+            onClick={applyUpdate}
+            disabled={updateLoading}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+          >
+            {updateLoading ? (
+              <><span style={{ display: 'inline-block', width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> Updating...</>
+            ) : (
+              <><span>⬆</span> {updateStatus?.updateAvailable ? 'Apply Update' : 'Re-pull & Rebuild'}</>
+            )}
+          </button>
+
+          <button
+            onClick={fetchUpdateStatus}
+            className="btn-primary"
+            style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}
+          >
+            🔄 Refresh Status
+          </button>
+
+          <button
+            onClick={takeSnapshot}
+            disabled={snapshotting}
+            className="btn-primary"
+            style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)', color: '#10b981' }}
+          >
+            {snapshotting ? 'Saving...' : '💾 Take Snapshot'}
+          </button>
+        </div>
+
+        {snapshotMsg && (
+          <div style={{ marginBottom: '16px', padding: '10px 14px', background: snapshotMsg.ok ? 'rgba(16,185,129,0.1)' : 'rgba(255,75,75,0.1)', border: `1px solid ${snapshotMsg.ok ? '#10b981' : 'var(--danger)'}`, borderRadius: '8px', color: snapshotMsg.ok ? '#10b981' : 'var(--danger)', fontSize: '0.875rem' }}>
+            {snapshotMsg.text}
+          </div>
+        )}
+
+        {/* Update live logs */}
+        {updateLogsVisible && (
+          <div style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: 'var(--text-muted)' }}>
+              <Terminal size={14} />
+              <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Update Output</span>
+              {updateLoading && <span style={{ display: 'inline-block', width: '10px', height: '10px', border: '2px solid rgba(102,252,241,0.3)', borderTopColor: 'var(--accent-color)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginLeft: '4px' }} />}
+            </div>
+            <pre
+              ref={updateLogsRef}
+              style={{ background: '#080a0d', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '16px', color: '#2ecc71', fontFamily: 'monospace', fontSize: '0.82rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '280px', overflowY: 'auto', lineHeight: '1.5' }}
+            >
+              {updateLogs || 'Waiting for output...'}
+            </pre>
+          </div>
+        )}
+
+        {/* Divider */}
+        <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0 20px' }} />
+
+        {/* DB Snapshots table */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div style={{ fontWeight: '600', fontSize: '0.95rem' }}>Database Snapshots</div>
+          <button onClick={fetchBackups} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            🔄 Refresh
+          </button>
+        </div>
+
+        {backupsLoading ? (
+          <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>Loading snapshots…</div>
+        ) : backups.length === 0 ? (
+          <div style={{ color: 'var(--text-muted)', padding: '20px', textAlign: 'center', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px dashed var(--border-color)' }}>
+            No snapshots yet. Click "Take Snapshot" or apply an update to auto-create one.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                  {['Label', 'Commit', 'Created', 'Size', 'Actions'].map(h => (
+                    <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: '600', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {backups.map((b) => (
+                  <tr key={b.filename} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '600', background: b.label === 'pre-update' ? 'rgba(102,252,241,0.1)' : b.label === 'pre-rollback' ? 'rgba(234,179,8,0.1)' : 'rgba(16,185,129,0.1)', color: b.label === 'pre-update' ? 'var(--accent-color)' : b.label === 'pre-rollback' ? '#eab308' : '#10b981' }}>
+                        {b.label}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{b.commit}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{formatDate(b.createdAt)}</td>
+                    <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{formatBytes(b.sizeBytes)}</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <button
+                        onClick={() => rollback(b.filename)}
+                        disabled={rollbackTarget === b.filename}
+                        style={{ padding: '5px 12px', borderRadius: '6px', border: '1px solid rgba(234,179,8,0.4)', background: 'rgba(234,179,8,0.1)', color: '#eab308', cursor: 'pointer', fontSize: '0.78rem', fontWeight: '600' }}
+                      >
+                        {rollbackTarget === b.filename ? 'Rolling back…' : '↩ Restore'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Rollback logs */}
+        {rollbackLogs && (
+          <div style={{ marginTop: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: 'var(--text-muted)' }}>
+              <Terminal size={14} />
+              <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rollback Output</span>
+            </div>
+            <pre
+              ref={rollbackLogsRef}
+              style={{ background: '#080a0d', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '16px', color: '#eab308', fontFamily: 'monospace', fontSize: '0.82rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '220px', overflowY: 'auto', lineHeight: '1.5' }}
+            >
+              {rollbackLogs}
+            </pre>
+          </div>
+        )}
+      </SettingSection>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
