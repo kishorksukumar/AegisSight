@@ -18,10 +18,192 @@ const io = new Server(server, {
   }
 });
 
-// REST API
+const crypto = require('crypto');
+const activeTokens = new Set();
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [salt, hash] = storedHash.split(':');
+  const verifyHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return hash === verifyHash;
+}
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username || 'admin');
+  if (user && verifyPassword(password, user.password_hash)) {
+    const token = crypto.randomBytes(32).toString('hex');
+    activeTokens.add(token);
+    res.json({ token, username: user.username });
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+});
+
+function verifyToken(req, res, next) {
+  const openPaths = ['/api/login', '/api/install.sh', '/api/agent-bundle.js', '/api/backup-bundle.js'];
+  // Allow open dashboard access or agent API fetching bypassing token check for agents
+  if (openPaths.includes(req.path) || req.path.match(/^\/api\/agents\/[^\/]+\/jobs$/)) {
+    return next();
+  }
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const token = authHeader.split(' ')[1];
+  if (!activeTokens.has(token)) {
+    return res.status(401).json({ error: 'Unauthorized Session' });
+  }
+  next();
+}
+
+app.use(verifyToken);
+
+app.get('/api/users', (req, res) => {
+  const users = db.prepare('SELECT id, username, created_at FROM users').all();
+  res.json(users);
+});
+
+app.post('/api/users', (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const stmt = db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)');
+    stmt.run(`user_${Date.now()}`, username, hashPassword(password));
+    res.status(201).json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message.includes('UNIQUE') ? 'Username taken' : err.message });
+  }
+});
+
+app.put('/api/users/:id/reset', (req, res) => {
+  const { newPassword } = req.body;
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), req.params.id);
+  res.json({ success: true });
+});
+
+app.delete('/api/users/:id', (req, res) => {
+  // Prevent deleting the very last user
+  const count = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+  if (count <= 1) return res.status(400).json({ error: 'Cannot delete the only remaining user.' });
+  
+  db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+// ── Settings APIs ─────────────────────────────────────────────────────────────
+const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+function setSetting(key, value) {
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+}
+
+app.get('/api/settings', (req, res) => {
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const result = {};
+  rows.forEach(r => result[r.key] = r.value);
+  res.json(result);
+});
+
+app.post('/api/settings/domain', (req, res) => {
+  const { domain } = req.body;
+  if (!domain) return res.status(400).json({ error: 'Domain is required' });
+  setSetting('domain', domain);
+  res.json({ success: true, domain });
+});
+
+app.post('/api/settings/email', (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+  setSetting('letsencrypt_email', email);
+  res.json({ success: true });
+});
+
+app.post('/api/settings/ssl', async (req, res) => {
+  const domain = getSetting('domain');
+  const email  = getSetting('letsencrypt_email');
+
+  if (!domain || domain === 'localhost') {
+    return res.status(400).json({ error: 'A valid domain must be configured before enabling SSL.' });
+  }
+  if (!email) {
+    return res.status(400).json({ error: 'A Let\'s Encrypt email is required before enabling SSL.' });
+  }
+
+  // Stream logs back to client
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Transfer-Encoding', 'chunked');
+  res.write(`[AegisSight] Starting SSL provisioning for ${domain}...\n`);
+
+  try {
+    // Run certbot inside the certbot container (or directly if not in Docker)
+    const certbotCmd = process.env.CERTBOT_CONTAINER
+      ? `docker exec ${process.env.CERTBOT_CONTAINER} certbot certonly --webroot -w /var/www/certbot -d ${domain} --email ${email} --agree-tos --non-interactive --force-renewal`
+      : `certbot certonly --webroot -w /var/www/certbot -d ${domain} --email ${email} --agree-tos --non-interactive --force-renewal`;
+
+    res.write('[AegisSight] Running Certbot...\n');
+    const output = execSync(certbotCmd, { timeout: 120000 }).toString();
+    res.write(output + '\n');
+
+    // Swap Nginx config to SSL version
+    const nginxContainer = process.env.NGINX_CONTAINER || 'aegissight-nginx';
+    const nginxSslConf = path.join(__dirname, '../../nginx/nginx.conf');
+    
+    try {
+      // Generate nginx.conf with domain substituted
+      const template = fs.readFileSync(nginxSslConf, 'utf8');
+      const rendered = template.replace(/\$\{DOMAIN\}/g, domain);
+      fs.writeFileSync('/tmp/aegis-nginx-ssl.conf', rendered);
+      
+      execSync(`docker cp /tmp/aegis-nginx-ssl.conf ${nginxContainer}:/etc/nginx/conf.d/default.conf`);
+      execSync(`docker exec ${nginxContainer} nginx -s reload`);
+      res.write('[AegisSight] Nginx reloaded with SSL configuration.\n');
+    } catch (nginxErr) {
+      res.write(`[AegisSight] Warning: Could not reload Nginx automatically: ${nginxErr.message}\n`);
+      res.write('[AegisSight] Please run: docker exec aegissight-nginx nginx -s reload\n');
+    }
+
+    setSetting('ssl_enabled', 'true');
+    res.write('[AegisSight] ✓ SSL enabled successfully!\n');
+    res.end();
+  } catch (err) {
+    res.write(`[AegisSight] ✗ SSL provisioning failed: ${err.message}\n`);
+    res.end();
+  }
+});
+
 app.get('/api/agents', (req, res) => {
   const agents = db.prepare('SELECT * FROM agents').all();
   res.json(agents);
+});
+
+app.get('/api/agents/:id', (req, res) => {
+  const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  res.json(agent);
+});
+
+app.get('/api/agents/:id/history', (req, res) => {
+  const history = db.prepare(`
+    SELECT h.*, j.name as job_name
+    FROM backup_history h
+    JOIN backup_jobs j ON h.job_id = j.id
+    WHERE j.agent_id = ?
+    ORDER BY h.start_time DESC LIMIT 50
+  `).all(req.params.id);
+  res.json(history);
 });
 
 app.get('/api/agents/:id/jobs', (req, res) => {
@@ -160,6 +342,24 @@ io.on('connection', (socket) => {
       io.emit('dashboard:agents_updated');
     } catch(err) {
       console.error('Error registering agent:', err);
+    }
+  });
+
+  socket.on('agent:telemetry', (data) => {
+    // data: { id, cpu_load, ram_usage, uptime }
+    const stmt = db.prepare(`
+      UPDATE agents SET 
+        cpu_load = @cpu_load, 
+        ram_usage = @ram_usage, 
+        uptime = @uptime,
+        last_seen = CURRENT_TIMESTAMP
+      WHERE id = @id
+    `);
+    try {
+      stmt.run(data);
+      io.emit('dashboard:agents_updated');
+    } catch(err) {
+      console.error('Error updating agent telemetry:', err);
     }
   });
 

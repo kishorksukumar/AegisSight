@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from './api';
 
 const API_URL = "http://localhost:4000/api";
 
@@ -29,8 +30,8 @@ export default function Agents() {
   const fetchData = async () => {
     try {
       const [aRes, dRes] = await Promise.all([
-        fetch(`${API_URL}/agents`),
-        fetch(`${API_URL}/destinations`)
+        apiFetch(`${API_URL}/agents`),
+        apiFetch(`${API_URL}/destinations`)
       ]);
       const aData = await aRes.json();
       const dData = await dRes.json();
@@ -47,7 +48,7 @@ export default function Agents() {
     e.preventDefault();
     try {
       JSON.parse(jobForm.source_paths); // Validate JSON array
-      const res = await fetch(`${API_URL}/jobs`, {
+      const res = await apiFetch(`${API_URL}/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...jobForm, source_paths: JSON.parse(jobForm.source_paths) })

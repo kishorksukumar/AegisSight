@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./master-app/backend
+      dockerfile: Dockerfile
+    container_name: aegissight-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=4000
+    volumes:
+      # Persist SQLite database
+      - backend_data:/app/data
+      # Docker socket — needed to trigger certbot & nginx reload from Settings page
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    expose:
+      - "4000"
+    networks:
+      - aegissight
+
+  frontend:
+    build:
+      context: ./master-app/frontend
+      dockerfile: Dockerfile
+    container_name: aegissight-frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - aegissight
+
+  nginx:
+    image: nginx:alpine
+    container_name: aegissight-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Start with no-ssl config; Settings page swaps this to nginx.conf after cert
+      - ./nginx/nginx-no-ssl.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx-ssl.conf:ro
+      - ./nginx:/etc/nginx/templates:ro
+      # Serve built frontend from the frontend container's /usr/share/nginx/html
+      - frontend_dist:/usr/share/nginx/html:ro
+      # Let's Encrypt certs and ACME challenge webroot
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - aegissight
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: aegissight-certbot
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # This service is started on-demand by the Settings page; idle otherwise
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done"
+    networks:
+      - aegissight
+
+volumes:
+  backend_data:
+  frontend_dist:
+  certbot_certs:
+  certbot_www:
+
+networks:
+  aegissight:
+    driver: bridge

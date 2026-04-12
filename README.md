@@ -1,63 +1,131 @@
-<div align="center">
-  <h1>🛡️ AegisSight</h1>
-  <p><b>Centralized Offsite Backup architecture for Linux servers.</b></p>
-</div>
+# AegisSight v0.2
 
-AegisSight is a powerful, self-hosted backup mediator that allows you to manage, schedule, and monitor direct-to-S3 (and FTP/SFTP) backups across your fleet of Linux servers from a single, beautiful dashboard.
+> Secure, self-hosted offsite backup management platform with real-time agent monitoring.
 
 ---
 
-## ✨ Features
+## What's New in v0.2
 
-- **Centralized Dashboard**: A beautiful, React-based UI to monitor the health and progress of backups across all your servers.
-- **Direct-to-S3 Streaming**: Agents stream archives directly to S3/MinIO without routing traffic through the mediator, ensuring high throughput and low bandwidth costs.
-- **Dynamic Agents**: Servers only need a quick one-line bash script to install their dependencies, securely connect via WebSockets, and receive their backup job schedules.
-- **Live Verification**: Confirm your cloud credentials instantly from the dashboard before saving.
-- **Extensible Destinations**: Out of the box support for S3/MinIO, FTP, SFTP, and SCP.
-
----
-
-## 🏗️ Architecture
-
-AegisSight is split into two main architectures:
-
-1. **Master App (Mediator)**: The central brain. It consists of an Express.js backend (with an SQLite database) and a React/Vite frontend. It holds all destination configurations, job schedules, and receives real-time WebSocket connection tracking from agents.
-2. **Agent App (Nodes)**: Lightweight Node.js scripts executed on the target Linux servers. They receive cron schedules via WebSockets from the Master App and execute `tar` / `@aws-sdk/lib-storage` streams natively.
+- 🐳 **Docker-based self-hosting** — full production stack with one command
+- 🔒 **Auto SSL** via Let's Encrypt & Certbot directly from the dashboard
+- ⚙️ **Settings page** — configure domain, email, and enable HTTPS in the UI
+- 👤 **User Management** — multi-user authentication with PBKDF2-hashed passwords
+- 📊 **Agent Detail pages** — per-server CPU, RAM, Uptime, job history
+- 🔑 **JWT-authenticated dashboard** with login/logout flow
 
 ---
 
-## 🚀 Getting Started (Master App)
+## Quick Start (Docker — Recommended)
 
-To run the mediator dashboard locally:
+### Prerequisites
+- Docker + Docker Compose v2
+- A Linux VPS or server (for production SSL)
 
-### 1. Start the Backend
+### 1. Clone the repo
+```bash
+git clone https://github.com/yourusername/AegisSight.git
+cd AegisSight
+```
+
+### 2. Run the installer
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+The installer will prompt you for:
+- **Admin username & password** — your initial dashboard login
+- **Domain** — the public domain you'll host AegisSight on (e.g. `aegis.company.com`)
+- **Let's Encrypt email** — for SSL cert expiry notices
+
+It writes a `.env` file, then runs `docker compose up -d --build`.
+
+### 3. Access the dashboard
+```
+http://your-domain.com
+```
+Login with the credentials you set during installation.
+
+### 4. Enable SSL
+1. Make sure your domain's DNS A record points to this server's IP.
+2. In the dashboard → **Settings** → enter your domain → click **Enable SSL (Let's Encrypt)**.
+3. AegisSight will run Certbot, obtain a certificate, and reload Nginx automatically. Your site is now HTTPS.
+
+---
+
+## Installing Agents on Servers
+
+Once the master app is running, go to **Agents** → **Add New Server** and copy the one-line install command:
+
+```bash
+curl -sL http://your-domain.com/api/install.sh | bash -s -- my-server-id
+```
+
+This installs the lightweight AegisSight agent on your Linux server. The agent will:
+- Register itself with the dashboard automatically
+- Report CPU load, RAM usage, and uptime every 10 seconds
+- Execute scheduled backup jobs and stream progress to the dashboard
+
+---
+
+## Local Development
+
+### Backend
 ```bash
 cd master-app/backend
 npm install
 node server.js
 ```
-*The backend will default to port 4000 and automatically bind a WebSocket listener.*
 
-### 2. Start the Frontend
+### Frontend
 ```bash
 cd master-app/frontend
 npm install
 npm run dev
 ```
-*The frontend dashboard will be available at `http://localhost:5173`.*
+
+Dashboard available at `http://localhost:5173` — backend API at `http://localhost:4000`.
 
 ---
 
-## 📡 Agent Installation
+## Architecture
 
-Once the Master App is running, navigate to the **Agents** tab in your dashboard. You will be provided with a dynamic `curl` bash script to run on your Linux nodes.
-
-```bash
-# Example agent deployment
-curl -sL http://<your-mediator-ip>:4000/api/install.sh | bash -s -- agent-web-01
+```
+┌──────────────────────────────────────────┐
+│            Self-Hosted Server            │
+│                                          │
+│  ┌─────────┐   ┌──────────┐             │
+│  │  Nginx  │──▶│ Frontend │ (React SPA) │
+│  │(port 80/│   └──────────┘             │
+│  │   443)  │──▶ /api ──▶ ┌──────────┐  │
+│  └─────────┘             │ Backend  │  │
+│       ▲                  │ Node.js  │  │
+│       │                  └────┬─────┘  │
+│  ┌────────┐                   │        │
+│  │Certbot │            ┌──────▼──────┐ │
+│  │(SSL)   │            │  SQLite DB  │ │
+│  └────────┘            └─────────────┘ │
+└──────────────────────────────────────────┘
+           ▲ WebSocket
+    ┌──────┴──────┐
+    │ Linux Agent │ (on each server)
+    └─────────────┘
 ```
 
-Once installed, the agent will immediately appear online in your AegisSight dashboard and await job scheduling.
+---
+
+## Environment Variables
+
+| Variable            | Description                                     | Default          |
+|---------------------|-------------------------------------------------|------------------|
+| `ADMIN_USERNAME`    | Initial admin username (first boot only)        | `admin`          |
+| `ADMIN_PASSWORD`    | Initial admin password (first boot only)        | `AegisSightAdmin!` |
+| `DOMAIN`            | Public domain for Nginx and Let's Encrypt       | `localhost`      |
+| `LETSENCRYPT_EMAIL` | Email for SSL cert registration                 | —                |
+| `PORT`              | Backend API port                                | `4000`           |
+| `ENCRYPTION_KEY`    | AES-256 key for credential storage (auto-gen)  | *(auto)*         |
 
 ---
-*Built with React, Express, and Socket.io.*
+
+## License
+MIT

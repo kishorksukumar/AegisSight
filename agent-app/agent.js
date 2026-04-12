@@ -12,6 +12,7 @@ const socket = io(AEGISSIGHT_URL);
 
 let currentJobs = [];
 let cronTasks = {};
+let telemetryInterval;
 
 socket.on("connect", () => {
   console.log("Connected to AegisSight:", AEGISSIGHT_URL);
@@ -24,10 +25,27 @@ socket.on("connect", () => {
   });
 
   fetchJobs();
+  
+  if (telemetryInterval) clearInterval(telemetryInterval);
+  telemetryInterval = setInterval(() => {
+    const ramTotal = os.totalmem();
+    const ramFree = os.freemem();
+    const cpuLoad = os.loadavg()[0].toFixed(2);
+    const ramUsage = ((ramTotal - ramFree) / ramTotal * 100).toFixed(2);
+    const uptime = os.uptime();
+    
+    socket.emit('agent:telemetry', {
+      id: AGENT_ID,
+      cpu_load: cpuLoad,
+      ram_usage: ramUsage,
+      uptime: uptime
+    });
+  }, 10000);
 });
 
 socket.on("disconnect", () => {
   console.log("Disconnected from AegisSight");
+  if (telemetryInterval) clearInterval(telemetryInterval);
 });
 
 async function fetchJobs() {

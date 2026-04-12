@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from './api';
 
 const API_URL = "http://localhost:4000/api";
 
@@ -22,7 +23,7 @@ export default function Destinations() {
 
   const fetchDestinations = async () => {
     try {
-      const res = await fetch(`${API_URL}/destinations`);
+      const res = await apiFetch(`${API_URL}/destinations`);
       setDestinations(await res.json());
     } catch(e) {}
   };
@@ -31,7 +32,7 @@ export default function Destinations() {
     setVerifyStatus('verifying');
     setVerifyError('');
     try {
-      const res = await fetch(`${API_URL}/destinations/verify`, {
+      const res = await apiFetch(`${API_URL}/destinations/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: formData.type, config: fields })
@@ -56,7 +57,7 @@ export default function Destinations() {
       return;
     }
     try {
-      await fetch(`${API_URL}/destinations`, {
+      await apiFetch(`${API_URL}/destinations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...formData, config: fields })
