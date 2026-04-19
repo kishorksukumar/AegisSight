@@ -72,7 +72,7 @@ try {
 const settingsDefaults = {
   domain: process.env.DOMAIN || 'localhost',
   ssl_enabled: 'false',
-  app_version: '0.2.0',
+  app_version: '0.4.1',
   letsencrypt_email: process.env.LETSENCRYPT_EMAIL || ''
 };
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');

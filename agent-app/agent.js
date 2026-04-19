@@ -9,6 +9,15 @@ const AEGISSIGHT_URL = process.env.AEGISSIGHT_URL || "http://localhost:4000";
 const AGENT_ID = process.env.AGENT_ID || `agent-${os.hostname()}`;
 const AGENT_TOKEN = process.env.AGENT_TOKEN;
 
+if (!AGENT_TOKEN) {
+  console.error('FATAL: AGENT_TOKEN environment variable is not set. Please set it in your .env file.');
+  process.exit(1);
+}
+
+if (!process.env.AGENT_ID) {
+  console.warn(`WARNING: AGENT_ID not set, using hostname-derived default: ${AGENT_ID}`);
+}
+
 const socket = io(AEGISSIGHT_URL, {
   auth: { token: AGENT_TOKEN, agent_id: AGENT_ID }
 });

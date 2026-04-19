@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.1] - 2026-04-19
+
+### Security
+- **Critical**: Fixed fatal syntax error (dangling `}`) in `agent-app/backup.js` that caused the agent to crash on startup.
+- **Critical**: Replaced all remaining `execSync` shell-string calls (nginx reload, docker restart) with `spawnSync` argument arrays to eliminate shell injection vectors.
+- **High**: Removed `/api/agent-bundle.js` and `/api/backup-bundle.js` from the public `openPaths` list — agent bundles now require a valid `AGENT_TOKEN`.
+- **High**: Fixed Host Header injection in the dynamic `install.sh` generator — URLs now use the trusted domain stored in the database rather than `req.headers.host`.
+- **High**: Added input validation for `POST /api/users` and `PUT /api/users/:id/reset` — username must be 3-32 alphanumeric chars, password minimum 8 characters.
+- **High**: Sanitized raw AWS SDK error messages from `POST /api/destinations/verify` — now returns a generic error message; details are logged server-side only.
+- **Medium**: Added regex validation for Agent IDs on `POST /api/agents`.
+- **Medium**: `decrypt()` fallback now returns `null` instead of raw plaintext for unrecognized input formats.
+- **Medium**: Added `express-rate-limit` — login endpoint is now limited to 10 attempts per 15 minutes per IP.
+- **Low**: Added `helmet` for standard HTTP security headers (CSP, X-Frame-Options, etc.).
+- **Low**: Added mandatory startup validation for `AGENT_TOKEN` in `agent.js` — exits with a clear error instead of failing silently.
+
 ## [0.4.0] - 2026-04-19
 
 ### Added

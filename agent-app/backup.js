@@ -138,8 +138,6 @@ async function streamToDestination(readableStream, type, config, filename, onPro
   }
 }
 
-}
-
 async function streamFromDestination(writableStream, type, config, filename, onProgress) {
   if (type === 's3' || !type) {
     const s3 = new S3Client({

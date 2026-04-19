@@ -76,8 +76,8 @@ function decrypt(text) {
     return null; // Safe explicit failure
   }
   
-  // Return raw text if it doesn't match any known encrypted formats
-  return text; 
+  // Do NOT return raw text — if it doesn't match a known encrypted format, treat it as a decryption failure
+  return null;
 }
 
 module.exports = { encrypt, decrypt };

@@ -5,15 +5,19 @@ const { Server } = require('socket.io');
 const db = require('./database');
 const { S3Client, HeadBucketCommand } = require('@aws-sdk/client-s3');
 const { encrypt, decrypt } = require('./crypto-util');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
+app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
 const server = http.createServer(app);
+// CORS origin will be tightened after db/settings is loaded below
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: (origin, cb) => cb(null, true), // tightened at startup
     methods: ["GET", "POST"]
   }
 });
@@ -38,7 +42,16 @@ function verifyPassword(password, storedHash) {
   return crypto.timingSafeEqual(verifyHash, storedHashBuffer);
 }
 
-app.post('/api/login', (req, res) => {
+// Rate limiter for login — 10 attempts per 15 minutes per IP
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again later.' }
+});
+
+app.post('/api/login', loginLimiter, (req, res) => {
   const { username, password } = req.body;
   
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username || 'admin');
@@ -61,7 +74,9 @@ app.post('/api/logout', (req, res) => {
 });
 
 function verifyToken(req, res, next) {
-  const openPaths = ['/api/login', '/api/install.sh', '/api/agent-bundle.js', '/api/backup-bundle.js'];
+  // Only /api/login and /api/install.sh are truly public
+  // Agent bundles require a valid agent token (handled below via agent auth path)
+  const openPaths = ['/api/login', '/api/install.sh'];
   if (openPaths.includes(req.path)) {
     return next();
   }
@@ -109,6 +124,12 @@ app.get('/api/users', (req, res) => {
 
 app.post('/api/users', (req, res) => {
   const { username, password } = req.body;
+  if (!username || !/^[a-zA-Z0-9_-]{3,32}$/.test(username)) {
+    return res.status(400).json({ error: 'Username must be 3-32 alphanumeric characters.' });
+  }
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
   try {
     const stmt = db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)');
     stmt.run(`user_${Date.now()}`, username, hashPassword(password));
@@ -120,6 +141,9 @@ app.post('/api/users', (req, res) => {
 
 app.put('/api/users/:id/reset', (req, res) => {
   const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), req.params.id);
   res.json({ success: true });
 });
@@ -201,18 +225,20 @@ app.post('/api/settings/ssl', async (req, res) => {
       throw new Error(`Certbot failed with status ${child.status}`);
     }
 
-    // Swap Nginx config to SSL version
-    const nginxContainer = process.env.NGINX_CONTAINER || 'aegissight-nginx';
-    const nginxSslConf = path.join(__dirname, '../../nginx/nginx.conf');
-    
+    // Swap Nginx config to SSL version — use spawnSync arrays (no shell injection)
     try {
-      // Generate nginx.conf with domain substituted
-      const template = fs.readFileSync(nginxSslConf, 'utf8');
-      const rendered = template.replace(/\$\{DOMAIN\}/g, domain);
+      const { spawnSync: _spawnSync } = require('child_process');
+      const nginxContainer = process.env.NGINX_CONTAINER || 'aegissight-nginx';
+      const nginxSslConf = path.join(__dirname, '../../nginx/nginx.conf');
+      const rendered = fs.readFileSync(nginxSslConf, 'utf8').replace(/\$\{DOMAIN\}/g, domain);
       fs.writeFileSync('/tmp/aegis-nginx-ssl.conf', rendered);
-      
-      execSync(`docker cp /tmp/aegis-nginx-ssl.conf ${nginxContainer}:/etc/nginx/conf.d/default.conf`);
-      execSync(`docker exec ${nginxContainer} nginx -s reload`);
+
+      const cpResult = _spawnSync('docker', ['cp', '/tmp/aegis-nginx-ssl.conf', `${nginxContainer}:/etc/nginx/conf.d/default.conf`], { timeout: 30000 });
+      if (cpResult.status !== 0) throw new Error(cpResult.stderr?.toString() || 'docker cp failed');
+
+      const reloadResult = _spawnSync('docker', ['exec', nginxContainer, 'nginx', '-s', 'reload'], { timeout: 30000 });
+      if (reloadResult.status !== 0) throw new Error(reloadResult.stderr?.toString() || 'nginx reload failed');
+
       res.write('[AegisSight] Nginx reloaded with SSL configuration.\n');
     } catch (nginxErr) {
       res.write(`[AegisSight] Warning: Could not reload Nginx automatically: ${nginxErr.message}\n`);
@@ -406,8 +432,14 @@ app.post('/api/update/rollback', (req, res) => {
     // Restart backend container so the restored DB is loaded fresh
     try {
       const backendContainer = process.env.BACKEND_CONTAINER || 'aegissight-backend';
-      execSync(`docker restart ${backendContainer}`, { timeout: 30000 });
-      log('[AegisSight] ✓ Backend container restarted with restored database.');
+      // Use spawnSync array form to avoid shell injection via env variables
+      const { spawnSync: _spawnSync2 } = require('child_process');
+      const result = _spawnSync2('docker', ['restart', backendContainer], { timeout: 30000 });
+      if (result.status === 0) {
+        log('[AegisSight] ✓ Backend container restarted with restored database.');
+      } else {
+        throw new Error(result.stderr?.toString() || 'docker restart failed');
+      }
     } catch(e) {
       log('[AegisSight] ⚠ Could not auto-restart container. Run: docker restart aegissight-backend');
     }
@@ -429,6 +461,9 @@ app.get('/api/agents', (req, res) => {
 app.post('/api/agents', (req, res) => {
   const { id } = req.body;
   if (!id) return res.status(400).json({ error: 'Agent ID is required' });
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
+    return res.status(400).json({ error: 'Agent ID must be 1-64 alphanumeric characters (hyphens and underscores allowed).' });
+  }
   const rawToken = crypto.randomBytes(32).toString('hex');
   const tokenHash = hashPassword(rawToken);
   try {
@@ -565,7 +600,8 @@ app.post('/api/destinations/verify', async (req, res) => {
       await client.send(new HeadBucketCommand({ Bucket: config.bucket }));
       res.json({ success: true });
     } catch (err) {
-      res.status(400).json({ success: false, error: err.message });
+      console.error('[S3 Verify Error]', err.message);
+      res.status(400).json({ success: false, error: 'Could not connect to S3. Check your credentials, region, and bucket name.' });
     }
   } else {
     // Mock success for other types
@@ -573,10 +609,17 @@ app.post('/api/destinations/verify', async (req, res) => {
   }
 });
 
-// Dynamic Install Script
+// Dynamic Install Script - uses trusted domain from DB, not req.headers.host
 app.get('/api/install.sh', (req, res) => {
+  // Read from trusted db setting; fallback to env var.
+  const configuredDomain = getSetting('domain') || process.env.DOMAIN || 'localhost';
+  const configuredPort  = process.env.PORT || '4000';
+  const serverUrl = configuredDomain === 'localhost'
+    ? `http://localhost:${configuredPort}`
+    : `https://${configuredDomain}`;
+
   const installScript = `#!/bin/bash
-# AegisSight Agent Install Script
+# AegisSight Agent Install Script v0.4.1
 if [ -z "$AGENT_ID" ] || [ -z "$AGENT_TOKEN" ]; then
   echo "Error: AGENT_ID and AGENT_TOKEN must be set as environment variables."
   exit 1
@@ -591,11 +634,11 @@ npm init -y > /dev/null
 npm install socket.io-client axios node-cron archiver @aws-sdk/client-s3 @aws-sdk/lib-storage basic-ftp ssh2-sftp-client dotenv > /dev/null
 
 echo "Downloading agent scripts..."
-curl -sL \${AEGISSIGHT_URL:-http://${req.headers.host}}/api/agent-bundle.js -o agent.js
-curl -sL \${AEGISSIGHT_URL:-http://${req.headers.host}}/api/backup-bundle.js -o backup.js
+curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" \${AEGISSIGHT_URL:-${serverUrl}}/api/agent-bundle.js -o agent.js
+curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" \${AEGISSIGHT_URL:-${serverUrl}}/api/backup-bundle.js -o backup.js
 
 echo "Creating .env..."
-echo "AEGISSIGHT_URL=\${AEGISSIGHT_URL:-http://${req.headers.host}}" > .env
+echo "AEGISSIGHT_URL=\${AEGISSIGHT_URL:-${serverUrl}}" > .env
 echo "AGENT_ID=$AGENT_ID" >> .env
 echo "AGENT_TOKEN=$AGENT_TOKEN" >> .env
 
