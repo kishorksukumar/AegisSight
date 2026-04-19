@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0] - 2026-04-19
+
+### Added
+- **Automated Remote Restore**: A completely new architecture allowing agents to natively stream and unpack `.tar.gz` archives securely from S3/FTP directly into their local filesystem.
+- **Zero-Disk Extract**: Restores stream seamlessly into the `tar` pipe over memory, entirely bypassing the need for temporary storage bloat on the Agent host.
+- **Granular Path Recovery**: Restore Modal includes specific input rules for defining isolated extraction targets alongside dedicated, customizable Restore Directory injections instead of defaulting exclusively to live root locations.
+- **Live WebSocket Progress Tracking**: Agents actively broadcast reverse-transfer telemetry to the master server enabling dedicated Dashboard tracking for active restoration sequences.
+
 ## [0.3.0] - 2026-04-19
 
 ### Added

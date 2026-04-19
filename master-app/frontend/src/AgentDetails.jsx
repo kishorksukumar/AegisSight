@@ -51,6 +51,10 @@ export default function AgentDetails() {
   const [history, setHistory] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  const [restoreModal, setRestoreModal] = useState(null);
+  const [restoreForm, setRestoreForm] = useState({ target_paths: '', restore_dir: '' });
+  const [activeRestores, setActiveRestores] = useState({});
 
   useEffect(() => {
     fetchAll();
@@ -58,6 +62,9 @@ export default function AgentDetails() {
     const socket = io({ auth: { token } });
     socket.on('dashboard:agents_updated', fetchAgent);
     socket.on('dashboard:history_updated', fetchHistory);
+    socket.on('dashboard:restore_status', (data) => {
+      setActiveRestores(prev => ({ ...prev, [data.restore_id]: data }));
+    });
     return () => socket.disconnect();
   }, [id]);
 
@@ -86,6 +93,37 @@ export default function AgentDetails() {
       const res = await apiFetch(`${API_URL}/agents/${id}/jobs`);
       if (res.ok) setJobs(await res.json());
     } catch (e) {}
+  };
+
+  const handleRestoreSubmit = async (e) => {
+    e.preventDefault();
+    if (!restoreModal) return;
+    try {
+      const paths = restoreForm.target_paths.split(',').map(p => p.trim()).filter(Boolean);
+      const res = await apiFetch(`${API_URL}/agents/${id}/restore`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          history_id: restoreModal.id,
+          target_paths: paths,
+          restore_dir: restoreForm.restore_dir
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActiveRestores(prev => ({
+          ...prev,
+          [data.restore_id]: { status: 'starting', progress: 0, logs: 'Initializing restore...' }
+        }));
+        setRestoreModal(null);
+        setRestoreForm({ target_paths: '', restore_dir: '' });
+      } else {
+        const err = await res.json();
+        alert('Restore failed: ' + err.error);
+      }
+    } catch(err) {
+      alert('Network error while triggering restore.');
+    }
   };
 
   if (loading) return (
@@ -175,6 +213,48 @@ export default function AgentDetails() {
         />
       </div>
 
+      {/* Active Restores */}
+      {Object.values(activeRestores).length > 0 && (
+        <div className="glass-card" style={{ marginBottom: '24px' }}>
+          <h2 style={{ marginBottom: '16px' }}>Active Restores</h2>
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Progress</th>
+                  <th>Logs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.values(activeRestores).map(restore => (
+                  <tr key={restore.restore_id}>
+                    <td>
+                      <span className={`status-badge status-${restore.status}`}>
+                        {restore.status.toUpperCase()}
+                      </span>
+                    </td>
+                    <td>
+                      {restore.status === 'running' || restore.status === 'starting' ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ flex: 1, background: 'rgba(255,255,255,0.1)', borderRadius: '4px', height: '6px' }}>
+                            <div style={{ width: `${restore.progress}%`, background: 'var(--accent-color)', height: '100%', borderRadius: '4px' }} />
+                          </div>
+                          <span style={{ fontSize: '0.8rem' }}>{restore.progress}%</span>
+                        </div>
+                      ) : restore.status === 'success' ? '100%' : '—'}
+                    </td>
+                    <td style={{ maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      {restore.logs}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Backup History */}
       <div className="glass-card" style={{ marginBottom: '24px' }}>
         <h2 style={{ marginBottom: '16px' }}>Backup History</h2>
@@ -188,6 +268,7 @@ export default function AgentDetails() {
                 <th>Started</th>
                 <th>Ended</th>
                 <th>Log</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -218,11 +299,16 @@ export default function AgentDetails() {
                   <td style={{ maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                     {item.logs}
                   </td>
+                  <td>
+                    {item.status === 'success' && (
+                      <button className="btn-primary" style={{ padding: '4px 8px', fontSize: '0.8rem' }} onClick={() => setRestoreModal(item)}>Restore</button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {history.length === 0 && (
                 <tr>
-                  <td colSpan="6" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                  <td colSpan="7" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                     No backup history for this agent yet.
                   </td>
                 </tr>
@@ -269,6 +355,46 @@ export default function AgentDetails() {
           </table>
         </div>
       </div>
+
+      {/* Restore Modal */}
+      {restoreModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="glass-card" style={{ width: '500px', maxWidth: '90%' }}>
+            <h2 style={{ marginBottom: '16px', color: 'var(--accent-color)' }}>Restore Backup</h2>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>
+              Restore from <strong>{restoreModal.job_name}</strong> ({formatDistanceToNow(new Date(restoreModal.start_time + 'Z'), { addSuffix: true })})
+            </p>
+            <form onSubmit={handleRestoreSubmit}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)' }}>Restore Directory (Optional)</label>
+                <input 
+                  type="text" 
+                  value={restoreForm.restore_dir} 
+                  onChange={e => setRestoreForm({...restoreForm, restore_dir: e.target.value})} 
+                  placeholder="e.g. /opt/aegissight-restore"
+                  style={{ width: '100%', padding: '10px', background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '4px' }} 
+                />
+                <small style={{ color: 'var(--text-muted)' }}>Leave blank to overwrite files in their original absolute paths.</small>
+              </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)' }}>Specific Paths to Restore (Optional)</label>
+                <input 
+                  type="text" 
+                  value={restoreForm.target_paths} 
+                  onChange={e => setRestoreForm({...restoreForm, target_paths: e.target.value})} 
+                  placeholder="e.g. var/www/html/index.php, etc/nginx"
+                  style={{ width: '100%', padding: '10px', background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '4px' }} 
+                />
+                <small style={{ color: 'var(--text-muted)' }}>Comma separated. Note: paths in tar archives typically do not have a leading slash.</small>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+                <button type="button" onClick={() => setRestoreModal(null)} style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'white', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" className="btn-primary" style={{ padding: '8px 16px' }}>Trigger Restore</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

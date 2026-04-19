@@ -469,6 +469,41 @@ app.get('/api/agents/:id/jobs', (req, res) => {
   res.json(jobs.map(j => ({ ...j, dest_config: j.dest_config ? decrypt(j.dest_config) : null })));
 });
 
+app.put('/api/agents/:id/restore', (req, res) => {
+  const { history_id, target_paths, restore_dir } = req.body;
+  
+  if (!history_id) return res.status(400).json({ error: 'history_id is required' });
+
+  const history = db.prepare('SELECT job_id, archive_name FROM backup_history WHERE id = ?').get(history_id);
+  if (!history || !history.archive_name) {
+    return res.status(400).json({ error: 'Backup history record not found or has no archive name.' });
+  }
+
+  const job = db.prepare('SELECT agent_id, destination_id FROM backup_jobs WHERE id = ?').get(history.job_id);
+  if (!job || job.agent_id !== req.params.id) {
+    return res.status(400).json({ error: 'Job does not belong to this agent.' });
+  }
+
+  const destination = db.prepare('SELECT type, config FROM destinations WHERE id = ?').get(job.destination_id);
+  if (!destination) {
+    return res.status(400).json({ error: 'Destination not found.' });
+  }
+
+  const restore_id = `rest-${Date.now()}`;
+  
+  io.to(`agent_${req.params.id}`).emit('agent:trigger_restore', {
+    restore_id,
+    history_id,
+    archive_name: history.archive_name,
+    dest_type: destination.type,
+    dest_config: decrypt(destination.config),
+    target_paths: target_paths || [],
+    restore_dir: restore_dir || '/'
+  });
+
+  res.json({ success: true, restore_id });
+});
+
 app.post('/api/jobs', (req, res) => {
   const { id, agent_id, name, source_paths, destination_id, backup_type, cron_schedule } = req.body;
   const stmt = db.prepare(`
@@ -613,6 +648,10 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log('A client connected:', socket.id, socket.isDashboard ? '[Dashboard]' : '[Agent]', socket.agentId || '');
 
+  if (socket.isAgent && socket.agentId) {
+    socket.join(`agent_${socket.agentId}`);
+  }
+
   socket.on('agent:register', (data) => {
     if (!socket.isAgent || socket.agentId !== data.id) return;
     
@@ -657,8 +696,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('agent:job_status', (data) => {
-    // data: { history_id, job_id, status, progress, file_size, logs }
-    const { history_id, job_id, status, progress, file_size, logs } = data;
+    // data: { history_id, job_id, status, progress, file_size, logs, archive_name }
+    const { history_id, job_id, status, progress, file_size, logs, archive_name } = data;
     
     // Verify job belongs to this agent
     if (socket.isAgent) {
@@ -670,9 +709,9 @@ io.on('connection', (socket) => {
     const exists = db.prepare('SELECT id FROM backup_history WHERE id = ?').get(history_id);
     if (!exists) {
       db.prepare(`
-        INSERT INTO backup_history (id, job_id, status, progress, file_size, logs)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(history_id, job_id, status, progress, file_size, logs);
+        INSERT INTO backup_history (id, job_id, status, progress, file_size, logs, archive_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(history_id, job_id, status, progress, file_size, logs, archive_name || null);
     } else {
       let query = `UPDATE backup_history SET status = ?, progress = ?, logs = ?`;
       const params = [status, progress, logs];
@@ -683,12 +722,21 @@ io.on('connection', (socket) => {
         query += `, file_size = ?`;
         params.push(file_size);
       }
+      if (archive_name) {
+        query += `, archive_name = ?`;
+        params.push(archive_name);
+      }
       query += ` WHERE id = ?`;
       params.push(history_id);
       db.prepare(query).run(...params);
     }
     
     io.emit('dashboard:history_updated', data);
+  });
+
+  socket.on('agent:restore_status', (data) => {
+    // Expected to broadcast restore status to dashboard UI
+    io.emit('dashboard:restore_status', data);
   });
 
   socket.on('disconnect', () => {

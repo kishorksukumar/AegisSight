@@ -1,16 +1,18 @@
-# AegisSight v0.2
+# AegisSight v0.4
 
 > Secure, self-hosted offsite backup management platform with real-time agent monitoring.
 
 ---
 
-## What's New in v0.2
+## What's New in v0.4
 
+- 🔄 **Automated Remote Restore** — Stream `.tar.gz` archives securely from S3/FTP directly down to the Agent and extract them on the fly.
+- 🛡️ **Hardened Security** — AES-256-GCM encryption for credentials, per-agent secure authentication tokens, and strict RCE mitigations against malicious payloads.
 - 🐳 **Docker-based self-hosting** — full production stack with one command
 - 🔒 **Auto SSL** via Let's Encrypt & Certbot directly from the dashboard
 - ⚙️ **Settings page** — configure domain, email, and enable HTTPS in the UI
 - 👤 **User Management** — multi-user authentication with PBKDF2-hashed passwords
-- 📊 **Agent Detail pages** — per-server CPU, RAM, Uptime, job history
+- 📊 **Agent Detail pages** — per-server CPU, RAM, Uptime, job history, and live Restore Tracking
 - 🔑 **JWT-authenticated dashboard** with login/logout flow
 
 ---

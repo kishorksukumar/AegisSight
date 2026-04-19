@@ -3,7 +3,7 @@ const { io } = require("socket.io-client");
 const axios = require("axios");
 const os = require("os");
 const cron = require("node-cron");
-const { performBackup } = require("./backup");
+const { performBackup, performRestore } = require("./backup");
 
 const AEGISSIGHT_URL = process.env.AEGISSIGHT_URL || "http://localhost:4000";
 const AGENT_ID = process.env.AGENT_ID || `agent-${os.hostname()}`;
@@ -97,7 +97,7 @@ async function executeJob(job) {
   });
 
   try {
-    await performBackup(job, (progressEvents) => {
+    const result = await performBackup(job, (progressEvents) => {
       socket.emit('agent:job_status', {
         history_id: historyId,
         job_id: job.id,
@@ -112,7 +112,8 @@ async function executeJob(job) {
       job_id: job.id,
       status: 'success',
       progress: 100,
-      logs: 'Backup completed successfully'
+      logs: 'Backup completed successfully',
+      archive_name: result.archiveName
     });
     console.log(`Job ${job.name} completed successfully.`);
     
@@ -132,4 +133,43 @@ async function executeJob(job) {
 socket.on("agent:trigger_job", (jobId) => {
   const job = currentJobs.find(j => j.id === jobId);
   if (job) executeJob(job);
+});
+
+socket.on("agent:trigger_restore", async (options) => {
+  const { history_id, restore_id } = options;
+  console.log(`Received restore request for history ${history_id}`);
+  
+  socket.emit('agent:restore_status', {
+    restore_id,
+    status: 'running',
+    progress: 0,
+    logs: 'Starting remote restore...'
+  });
+
+  try {
+    await performRestore(options, (progressEvents) => {
+      socket.emit('agent:restore_status', {
+        restore_id,
+        status: 'running',
+        progress: progressEvents.percentage || 50,
+        logs: progressEvents.logs
+      });
+    });
+
+    socket.emit('agent:restore_status', {
+      restore_id,
+      status: 'success',
+      progress: 100,
+      logs: 'Restore completed successfully'
+    });
+    console.log(`Restore ${history_id} completed successfully.`);
+  } catch (error) {
+    console.error(`Restore ${history_id} failed:`, error);
+    socket.emit('agent:restore_status', {
+      restore_id,
+      status: 'failed',
+      progress: 0,
+      logs: `Error: ${error.message}`
+    });
+  }
 });

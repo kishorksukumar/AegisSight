@@ -44,6 +44,7 @@ db.exec(`
     end_time DATETIME,
     file_size INTEGER,
     logs TEXT,
+    archive_name TEXT,
     FOREIGN KEY(job_id) REFERENCES backup_jobs(id)
   );
 
@@ -59,6 +60,13 @@ db.exec(`
     value TEXT
   );
 `);
+
+// Run migrations for existing databases
+try {
+  db.prepare('ALTER TABLE backup_history ADD COLUMN archive_name TEXT').run();
+} catch (e) {
+  // Ignore if column already exists
+}
 
 // Seed default settings
 const settingsDefaults = {
