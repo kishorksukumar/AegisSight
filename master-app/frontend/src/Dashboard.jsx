@@ -5,8 +5,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { Server, Activity, DatabaseBackup, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const SOCKET_URL = "http://localhost:4000";
-const API_URL = "http://localhost:4000/api";
+const API_URL = "/api";
 
 function formatUptime(seconds) {
   if (!seconds) return 'N/A';
@@ -24,7 +23,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    const socket = io(SOCKET_URL);
+    const token = localStorage.getItem('aegissight_token');
+    const socket = io({ auth: { token } });
     socket.on('dashboard:agents_updated', fetchData);
     socket.on('dashboard:history_updated', fetchData);
     return () => socket.disconnect();

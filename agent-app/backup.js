@@ -30,7 +30,18 @@ async function performBackup(job, onProgress) {
         tarArgs.push(`--listed-incremental=${snapFile}`);
       }
 
-      tarArgs = tarArgs.concat(sourcePaths);
+      if (!Array.isArray(sourcePaths) || sourcePaths.length === 0) {
+        throw new Error('source_paths must be a non-empty array of strings');
+      }
+      
+      const validPaths = sourcePaths.map(p => typeof p === 'string' ? p.trim() : '').filter(p => p.length > 0);
+      if (validPaths.length === 0) {
+        throw new Error('source_paths must contain at least one valid path string');
+      }
+
+      // Add -- to signify end of options to tar, preventing option injection
+      tarArgs.push('--');
+      tarArgs = tarArgs.concat(validPaths);
       
       onProgress({ logs: `Starting ${backup_type} tar archive process...`, percentage: 10 });
       const tarProcess = spawn('tar', tarArgs);

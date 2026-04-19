@@ -55,10 +55,13 @@ Login with the credentials you set during installation.
 
 ## Installing Agents on Servers
 
-Once the master app is running, go to **Agents** → **Add New Server** and copy the one-line install command:
+Once the master app is running, go to **Agents** → **Add New Server** and generate a secure enrollment token. 
+Copy the multi-line install command provided by the dashboard:
 
 ```bash
-curl -sL http://your-domain.com/api/install.sh | bash -s -- my-server-id
+export AGENT_ID=your-agent-id
+export AGENT_TOKEN=your-secure-token
+curl -fsSL https://your-domain.com/api/install.sh | bash
 ```
 
 This installs the lightweight AegisSight agent on your Linux server. The agent will:
@@ -119,7 +122,7 @@ Dashboard available at `http://localhost:5173` — backend API at `http://localh
 | Variable            | Description                                     | Default          |
 |---------------------|-------------------------------------------------|------------------|
 | `ADMIN_USERNAME`    | Initial admin username (first boot only)        | `admin`          |
-| `ADMIN_PASSWORD`    | Initial admin password (first boot only)        | `AegisSightAdmin!` |
+| `ADMIN_PASSWORD`    | Initial admin password (first boot only)        | *(randomly generated)* |
 | `DOMAIN`            | Public domain for Nginx and Let's Encrypt       | `localhost`      |
 | `LETSENCRYPT_EMAIL` | Email for SSL cert registration                 | —                |
 | `PORT`              | Backend API port                                | `4000`           |

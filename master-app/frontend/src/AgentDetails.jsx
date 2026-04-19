@@ -7,8 +7,7 @@ import {
   ArrowLeft, Server, Cpu, MemoryStick, Clock, Wifi, Activity
 } from 'lucide-react';
 
-const SOCKET_URL = "http://localhost:4000";
-const API_URL = "http://localhost:4000/api";
+const API_URL = "/api";
 
 function formatUptime(seconds) {
   if (!seconds) return 'N/A';
@@ -55,7 +54,8 @@ export default function AgentDetails() {
 
   useEffect(() => {
     fetchAll();
-    const socket = io(SOCKET_URL);
+    const token = localStorage.getItem('aegissight_token');
+    const socket = io({ auth: { token } });
     socket.on('dashboard:agents_updated', fetchAgent);
     socket.on('dashboard:history_updated', fetchHistory);
     return () => socket.disconnect();

@@ -12,6 +12,7 @@ db.exec(`
     ip_address TEXT,
     platform TEXT,
     status TEXT DEFAULT 'offline',
+    token_hash TEXT,
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -76,21 +77,26 @@ try { db.exec(`ALTER TABLE backup_jobs ADD COLUMN backup_type TEXT DEFAULT 'full
 try { db.exec(`ALTER TABLE agents ADD COLUMN cpu_load TEXT;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN ram_usage TEXT;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN uptime INTEGER;`); } catch(e) {}
+try { db.exec(`ALTER TABLE agents ADD COLUMN token_hash TEXT;`); } catch(e) {}
 
 const crypto = require('crypto');
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 600000, 64, 'sha512').toString('hex');
   return `${salt}:${hash}`;
 }
 
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
 if (userCount === 0) {
   const seedUsername = process.env.ADMIN_USERNAME || 'admin';
-  const seedPassword = process.env.ADMIN_PASSWORD || 'AegisSightAdmin!';
+  const seedPassword = process.env.ADMIN_PASSWORD || crypto.randomBytes(8).toString('hex');
   db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)')
     .run(`user_${Date.now()}`, seedUsername, hashPassword(seedPassword));
+  console.log(`=============================================================`);
   console.log(`✓ Created initial admin user: ${seedUsername}`);
+  console.log(`✓ Default password: ${seedPassword}`);
+  console.log(`⚠️ Please write this down. It will not be shown again.`);
+  console.log(`=============================================================`);
 }
 
 module.exports = db;

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from './api';
 
-const API_URL = "http://localhost:4000/api";
+const API_URL = "/api";
 
 export default function Agents() {
   const [showInstall, setShowInstall] = useState(false);
   const [agentId, setAgentId] = useState(`agent_${Math.floor(Math.random()*10000)}`);
+  const [agentToken, setAgentToken] = useState('');
   
   const [agents, setAgents] = useState([]);
   const [destinations, setDestinations] = useState([]);
@@ -20,8 +21,7 @@ export default function Agents() {
     cron_schedule: '0 2 * * *'
   });
 
-  const host = window.location.hostname;
-  const curlCommand = `curl -sL http://${host}:4000/api/install.sh | bash -s -- ${agentId}`;
+  const curlCommand = agentToken ? `export AGENT_ID=${agentId}\nexport AGENT_TOKEN=${agentToken}\ncurl -fsSL https://${window.location.host}/api/install.sh | bash` : '';
 
   useEffect(() => {
     fetchData();
@@ -42,6 +42,25 @@ export default function Agents() {
       if (aData.length > 0 && !jobForm.agent_id) setJobForm(f => ({...f, agent_id: aData[0].id}));
       if (dData.length > 0 && !jobForm.destination_id) setJobForm(f => ({...f, destination_id: dData[0].id}));
     } catch (e) {}
+  };
+
+  const handleEnrollment = async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/agents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: agentId })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAgentToken(data.token);
+        fetchData();
+      } else {
+        alert(data.error || 'Enrollment failed');
+      }
+    } catch(err) {
+      alert("Failed to enroll agent.");
+    }
   };
 
   const handleJobSubmit = async (e) => {
@@ -66,7 +85,7 @@ export default function Agents() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h2>Server Agent Manager</h2>
-        <button className="btn-primary" onClick={() => setShowInstall(!showInstall)}>
+        <button className="btn-primary" onClick={() => { setShowInstall(!showInstall); setAgentToken(''); }}>
           {showInstall ? 'Close Installer' : '+ Add New Server'}
         </button>
       </div>
@@ -75,7 +94,7 @@ export default function Agents() {
         <div className="glass-card" style={{ marginBottom: '20px', backgroundColor: 'rgba(102, 252, 241, 0.05)', borderColor: 'var(--accent-color)' }}>
           <h3 style={{ color: 'var(--accent-color)', marginBottom: '10px' }}>Install New Agent</h3>
           <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>
-            Run the following command on your Linux server. This will automatically download Node.js dependencies and connect the latest AegisSight agent script to this dashboard.
+            To securely connect a server, first generate a unique enrollment token. The token will only be shown once.
           </p>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
@@ -83,20 +102,24 @@ export default function Agents() {
             <input 
               value={agentId} 
               onChange={e => setAgentId(e.target.value.replace(/\s+/g, '-'))} 
+              disabled={!!agentToken}
               style={{ padding: '6px', background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '4px' }} 
             />
+            {!agentToken && <button className="btn-primary" onClick={handleEnrollment} style={{ padding: '6px 12px' }}>Generate Token</button>}
           </div>
 
-          <div style={{ padding: '15px', background: '#0b0c10', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
-            <code style={{ color: '#2ecc71', fontSize: '0.9rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {curlCommand}
-            </code>
-            <button 
-              onClick={() => navigator.clipboard.writeText(curlCommand)}
-              style={{ position: 'absolute', right: '10px', top: '10px', background: 'var(--surface-color)', padding: '4px 8px', borderRadius: '4px', color: 'white', border: '1px solid var(--border-color)' }}>
-              Copy
-            </button>
-          </div>
+          {agentToken && (
+             <div style={{ padding: '15px', background: '#0b0c10', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>
+               <code style={{ color: '#2ecc71', fontSize: '0.9rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                 {curlCommand}
+               </code>
+               <button 
+                 onClick={() => navigator.clipboard.writeText(curlCommand)}
+                 style={{ position: 'absolute', right: '10px', top: '10px', background: 'var(--surface-color)', padding: '4px 8px', borderRadius: '4px', color: 'white', border: '1px solid var(--border-color)' }}>
+                 Copy
+               </button>
+             </div>
+          )}
         </div>
       )}
 

@@ -7,8 +7,11 @@ const { performBackup } = require("./backup");
 
 const AEGISSIGHT_URL = process.env.AEGISSIGHT_URL || "http://localhost:4000";
 const AGENT_ID = process.env.AGENT_ID || `agent-${os.hostname()}`;
+const AGENT_TOKEN = process.env.AGENT_TOKEN;
 
-const socket = io(AEGISSIGHT_URL);
+const socket = io(AEGISSIGHT_URL, {
+  auth: { token: AGENT_TOKEN, agent_id: AGENT_ID }
+});
 
 let currentJobs = [];
 let cronTasks = {};
@@ -50,7 +53,9 @@ socket.on("disconnect", () => {
 
 async function fetchJobs() {
   try {
-    const res = await axios.get(`${AEGISSIGHT_URL}/api/agents/${AGENT_ID}/jobs`);
+    const res = await axios.get(`${AEGISSIGHT_URL}/api/agents/${AGENT_ID}/jobs`, {
+      headers: { Authorization: `Bearer ${AGENT_TOKEN}` }
+    });
     currentJobs = res.data;
     console.log(`Fetched ${currentJobs.length} backup jobs.`);
     scheduleJobs();
