@@ -55,17 +55,19 @@ export default function AgentDetails() {
   const [restoreModal, setRestoreModal] = useState(null);
   const [restoreForm, setRestoreForm] = useState({ target_paths: '', restore_dir: '' });
   const [activeRestores, setActiveRestores] = useState({});
+  const socketRef = React.useRef(null);
 
   useEffect(() => {
     fetchAll();
     const token = localStorage.getItem('aegissight_token');
     const socket = io({ auth: { token } });
+    socketRef.current = socket;
     socket.on('dashboard:agents_updated', fetchAgent);
     socket.on('dashboard:history_updated', fetchHistory);
     socket.on('dashboard:restore_status', (data) => {
       setActiveRestores(prev => ({ ...prev, [data.restore_id]: data }));
     });
-    return () => socket.disconnect();
+    return () => { socket.disconnect(); socketRef.current = null; };
   }, [id]);
 
   const fetchAll = async () => {
@@ -100,9 +102,13 @@ export default function AgentDetails() {
     if (!restoreModal) return;
     try {
       const paths = restoreForm.target_paths.split(',').map(p => p.trim()).filter(Boolean);
+      const socketId = socketRef.current?.id;
       const res = await apiFetch(`${API_URL}/agents/${id}/restore`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(socketId ? { 'x-socket-id': socketId } : {})
+        },
         body: JSON.stringify({
           history_id: restoreModal.id,
           target_paths: paths,

@@ -284,7 +284,11 @@ function getGitHubRelease() {
 }
 
 function getCurrentGitCommit() {
-  try { return execSync('git rev-parse --short HEAD', { cwd: path.join(__dirname, '../..') }).toString().trim(); }
+  try {
+    const { spawnSync } = require('child_process');
+    const result = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: path.join(__dirname, '../..') });
+    return result.stdout?.toString().trim() || 'unknown';
+  }
   catch(e) { return 'unknown'; }
 }
 
@@ -342,18 +346,21 @@ app.post('/api/update/apply', (req, res) => {
     const prevCommit = getCurrentGitCommit();
     log(`[AegisSight] Current commit: ${prevCommit}`);
 
-    // 3. Pull latest code
+    // 3. Pull latest code — use spawnSync array (no shell injection)
     log('[AegisSight] Step 2/4: Pulling latest code from GitHub...');
-    const pullOutput = execSync('git pull origin main', { cwd: repoRoot, timeout: 60000 }).toString();
-    log(pullOutput);
+    const { spawnSync: _spawn } = require('child_process');
+    const pullResult = _spawn('git', ['pull', 'origin', 'main'], { cwd: repoRoot, timeout: 60000 });
+    if (pullResult.status !== 0) throw new Error(pullResult.stderr?.toString() || 'git pull failed');
+    log(pullResult.stdout?.toString() || 'Already up to date.');
 
     const newCommit = getCurrentGitCommit();
     log(`[AegisSight] ✓ Updated to commit: ${newCommit}`);
 
-    // 4. Rebuild & restart containers
+    // 4. Rebuild & restart containers — use spawnSync array (no shell injection)
     log('[AegisSight] Step 3/4: Rebuilding containers (this may take a minute)...');
-    const composeOutput = execSync('docker compose up -d --build', { cwd: repoRoot, timeout: 300000 }).toString();
-    log(composeOutput || '[AegisSight] Containers rebuilt and restarted.');
+    const composeResult = _spawn('docker', ['compose', 'up', '-d', '--build'], { cwd: repoRoot, timeout: 300000 });
+    if (composeResult.status !== 0) throw new Error(composeResult.stderr?.toString() || 'docker compose failed');
+    log(composeResult.stdout?.toString() || '[AegisSight] Containers rebuilt and restarted.');
 
     // 5. Update version in settings
     const newVersion = (() => {
@@ -525,10 +532,13 @@ app.put('/api/agents/:id/restore', (req, res) => {
   }
 
   const restore_id = `rest-${Date.now()}`;
+  // Track which socket triggered this restore so we can scope progress updates
+  const triggerSocketId = req.headers['x-socket-id'] || null;
   
   io.to(`agent_${req.params.id}`).emit('agent:trigger_restore', {
     restore_id,
     history_id,
+    trigger_socket_id: triggerSocketId,
     archive_name: history.archive_name,
     dest_type: destination.type,
     dest_config: decrypt(destination.config),
@@ -778,8 +788,17 @@ io.on('connection', (socket) => {
   });
 
   socket.on('agent:restore_status', (data) => {
-    // Expected to broadcast restore status to dashboard UI
-    io.emit('dashboard:restore_status', data);
+    // Scope restore status only to the dashboard socket that triggered it,
+    // otherwise fall back to broadcasting to all authenticated dashboards.
+    const { trigger_socket_id } = data;
+    if (trigger_socket_id) {
+      io.to(trigger_socket_id).emit('dashboard:restore_status', data);
+    } else {
+      // Fallback: emit only to dashboard sockets (not agents)
+      for (const [, sock] of io.sockets.sockets) {
+        if (sock.isDashboard) sock.emit('dashboard:restore_status', data);
+      }
+    }
   });
 
   socket.on('disconnect', () => {

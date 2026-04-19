@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.2] - 2026-04-19
+
+### Security
+- **High**: Replaced remaining `execSync` shell-string calls in `/api/update/apply` (`git pull`, `docker compose up`) and `getCurrentGitCommit()` with `spawnSync` argument arrays — all `execSync` usage is now fully eliminated from the codebase.
+- **Medium**: Scoped WebSocket `dashboard:restore_status` broadcasts to only the specific dashboard session that triggered the restore, instead of broadcasting to all connected clients. Uses `x-socket-id` request header passed from the frontend.
+
 ## [0.4.1] - 2026-04-19
 
 ### Security
