@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.5] - 2026-04-24
+
+### Security
+- **Medium**: Resolved `fast-xml-parser` advisory originating from `@aws-sdk/client-s3` transitive dependencies in both `master-app/backend` and `agent-app` by using npm overrides to enforce `fast-xml-parser@^5.7.0`. The entire project now reports 0 vulnerabilities in `npm audit`.
+
 ## [0.4.4] - 2026-04-24
 
 ### Security & Bug Fixes

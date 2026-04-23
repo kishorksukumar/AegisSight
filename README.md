@@ -1,4 +1,4 @@
-# AegisSight v0.4.4
+# AegisSight v0.4.5
 
 > Secure, self-hosted offsite backup management platform with real-time agent monitoring.
 
