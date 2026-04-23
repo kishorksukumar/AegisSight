@@ -261,7 +261,7 @@ const https = require('https');
 
 const REPO_OWNER = 'kishorksukumar';
 const REPO_NAME  = 'AegisSight';
-const BACKUPS_DIR = path.join(__dirname, '../..', 'aegissight-backups');
+const BACKUPS_DIR = path.join(__dirname, 'data', 'backups');
 const DB_PATH = path.join(__dirname, 'data', 'aegissight.sqlite');
 
 // Ensure backups dir exists

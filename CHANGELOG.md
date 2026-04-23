@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.7] - 2026-04-24
+
+### Bug Fixes
+- **High**: Fixed database backups path to be stored within the persistent `/app/data/backups` Docker volume mount, ensuring backup snapshots survive container recreation.
+- **High**: Fixed overly strict HTTPS requirement in the frontend's agent install command generator, allowing bootstrap and local installs to correctly use `http://` when applicable.
+- **Low**: Updated the baseline seeded `app_version` in the database to reflect `0.4.7` for fresh installs.
+
+
 ## [0.4.6] - 2026-04-24
 
 ### Bug Fixes & Optimizations

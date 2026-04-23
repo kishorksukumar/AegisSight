@@ -21,7 +21,7 @@ export default function Agents() {
     cron_schedule: '0 2 * * *'
   });
 
-  const curlCommand = agentToken ? `export AGENT_ID=${agentId}\nexport AGENT_TOKEN=${agentToken}\ncurl -fsSL https://${window.location.host}/api/install.sh | bash` : '';
+  const curlCommand = agentToken ? `export AGENT_ID=${agentId}\nexport AGENT_TOKEN=${agentToken}\ncurl -fsSL ${window.location.protocol}//${window.location.host}/api/install.sh | bash` : '';
 
   useEffect(() => {
     fetchData();
