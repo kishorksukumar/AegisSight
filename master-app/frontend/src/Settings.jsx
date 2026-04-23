@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { apiFetch } from './api';
 import { Globe, Shield, Info, CheckCircle, AlertTriangle, Terminal } from 'lucide-react';
 
-const API_URL = 'http://localhost:4000/api';
+const API_URL = '/api';
 
 function SettingSection({ icon, title, children }) {
   return (

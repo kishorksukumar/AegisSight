@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.6] - 2026-04-24
+
+### Bug Fixes & Optimizations
+- **High**: Fixed SQLite database path in `database.js` and `server.js` to correctly target the `/app/data` volume mount (`data/aegissight.sqlite`) ensuring data persistence across Docker container recreations.
+- **High**: Replaced hardcoded `http://localhost:4000/api` with relative `/api` paths in frontend React components (`Settings.jsx`, `Users.jsx`, `Destinations.jsx`) to fix API routing in production environments.
+- **Moderate**: Optimized agent bundle authorization (`verifyToken`) by appending `?agent_id=$AGENT_ID` to download requests in the `install.sh` script, avoiding full-table scans of the `agents` table.
+
+
 ## [0.4.5] - 2026-04-24
 
 ### Security

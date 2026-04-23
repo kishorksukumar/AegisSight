@@ -95,26 +95,22 @@ function verifyToken(req, res, next) {
   const isGlobalJobsGet = req.path === '/api/jobs' && req.method === 'GET';
   
   if (agentPathMatch || isAgentBundle || isGlobalJobsGet) {
-    let agentId = agentPathMatch ? agentPathMatch[1] : null;
+    let agentId = agentPathMatch ? agentPathMatch[1] : req.query.agent_id;
 
-    // For bundle downloads or global job GET, we might not have agentId in the URL.
-    // If it's a bundle download or global job fetch, we authorize ANY valid agent token.
-    if (isAgentBundle || isGlobalJobsGet) {
-       // We can't easily verify WHICH agent it is without a body or param, 
-       // but we can check if the token matches ANY agent in the system.
-       // Note: This is still restricted to authenticated agents.
+    if (agentId) {
+      // Scoped check: Fast row-lookup if agent ID is known (via path or query)
+      const agent = db.prepare('SELECT token_hash FROM agents WHERE id = ?').get(agentId);
+      if (agent && agent.token_hash && verifyPassword(token, agent.token_hash)) {
+        return next();
+      }
+    } else if (isAgentBundle || isGlobalJobsGet) {
+       // Fallback: Full table scan ONLY if agent ID is completely missing (legacy compat)
        const agents = db.prepare('SELECT id, token_hash FROM agents').all();
        for (const agent of agents) {
          if (agent.token_hash && verifyPassword(token, agent.token_hash)) {
            return next();
          }
        }
-    } else if (agentId) {
-      // Scoped check: Agent is accessing its own /api/agents/:id/... endpoints
-      const agent = db.prepare('SELECT token_hash FROM agents WHERE id = ?').get(agentId);
-      if (agent && agent.token_hash && verifyPassword(token, agent.token_hash)) {
-        return next();
-      }
     }
   }
 
@@ -266,7 +262,7 @@ const https = require('https');
 const REPO_OWNER = 'kishorksukumar';
 const REPO_NAME  = 'AegisSight';
 const BACKUPS_DIR = path.join(__dirname, '../..', 'aegissight-backups');
-const DB_PATH = path.join(__dirname, 'aegissight.sqlite');
+const DB_PATH = path.join(__dirname, 'data', 'aegissight.sqlite');
 
 // Ensure backups dir exists
 if (!fs.existsSync(BACKUPS_DIR)) fs.mkdirSync(BACKUPS_DIR, { recursive: true });
@@ -654,8 +650,8 @@ npm init -y > /dev/null
 npm install socket.io-client axios node-cron archiver @aws-sdk/client-s3 @aws-sdk/lib-storage basic-ftp ssh2-sftp-client dotenv > /dev/null
 
 echo "Downloading agent scripts..."
-curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" \${AEGISSIGHT_URL:-${serverUrl}}/api/agent-bundle.js -o agent.js
-curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" \${AEGISSIGHT_URL:-${serverUrl}}/api/backup-bundle.js -o backup.js
+curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\${AEGISSIGHT_URL:-${serverUrl}}/api/agent-bundle.js?agent_id=$AGENT_ID" -o agent.js
+curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\${AEGISSIGHT_URL:-${serverUrl}}/api/backup-bundle.js?agent_id=$AGENT_ID" -o backup.js
 
 echo "Creating .env..."
 echo "AEGISSIGHT_URL=\${AEGISSIGHT_URL:-${serverUrl}}" > .env

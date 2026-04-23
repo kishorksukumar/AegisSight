@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch } from './api';
 import { formatDistanceToNow } from 'date-fns';
 
-const API_URL = "http://localhost:4000/api";
+const API_URL = '/api';
 
 export default function Users() {
   const [users, setUsers] = useState([]);

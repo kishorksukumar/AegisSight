@@ -1,9 +1,14 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const { hashPassword } = require('./auth-util');
 
-const dbPath = path.join(__dirname, 'aegissight.sqlite');
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+const dbPath = path.join(dataDir, 'aegissight.sqlite');
 const db = new Database(dbPath); // Removed verbose for cleaner startup logs
 
 // Initialize database schema
