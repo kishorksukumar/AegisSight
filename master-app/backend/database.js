@@ -1,5 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const crypto = require('crypto');
+const { hashPassword } = require('./auth-util');
 
 const dbPath = path.join(__dirname, 'aegissight.sqlite');
 const db = new Database(dbPath); // Removed verbose for cleaner startup logs
@@ -87,12 +89,7 @@ try { db.exec(`ALTER TABLE agents ADD COLUMN ram_usage TEXT;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN uptime INTEGER;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN token_hash TEXT;`); } catch(e) {}
 
-const crypto = require('crypto');
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 600000, 64, 'sha512').toString('hex');
-  return `${salt}:${hash}`;
-}
+// Password hashing consolidated in auth-util.js
 
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
 if (userCount === 0) {

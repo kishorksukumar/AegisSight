@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const db = require('./database');
 const { S3Client, HeadBucketCommand } = require('@aws-sdk/client-s3');
 const { encrypt, decrypt } = require('./crypto-util');
+const { hashPassword, verifyPassword } = require('./auth-util');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
@@ -24,23 +25,10 @@ const io = new Server(server, {
 
 const crypto = require('crypto');
 const activeTokens = new Map();
+const activeRestores = new Map();
 const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 600000, 64, 'sha512').toString('hex');
-  return `${salt}:${hash}`;
-}
-
-function verifyPassword(password, storedHash) {
-  if (!storedHash) return false;
-  const [salt, hash] = storedHash.split(':');
-  if (!salt || !hash) return false;
-  const verifyHash = crypto.pbkdf2Sync(password, salt, 600000, 64, 'sha512');
-  const storedHashBuffer = Buffer.from(hash, 'hex');
-  if (verifyHash.length !== storedHashBuffer.length) return false;
-  return crypto.timingSafeEqual(verifyHash, storedHashBuffer);
-}
+// Password hashing consolidated in auth-util.js
 
 // Rate limiter for login — 10 attempts per 15 minutes per IP
 const loginLimiter = rateLimit({
@@ -75,7 +63,6 @@ app.post('/api/logout', (req, res) => {
 
 function verifyToken(req, res, next) {
   // Only /api/login and /api/install.sh are truly public
-  // Agent bundles require a valid agent token (handled below via agent auth path)
   const openPaths = ['/api/login', '/api/install.sh'];
   if (openPaths.includes(req.path)) {
     return next();
@@ -86,6 +73,7 @@ function verifyToken(req, res, next) {
   }
   const token = authHeader.split(' ')[1];
   
+  // 1. Dashboard User Authentication
   const session = activeTokens.get(token);
   if (session) {
     if (session.expiresAt > Date.now()) {
@@ -95,16 +83,34 @@ function verifyToken(req, res, next) {
     }
   }
 
-  // Fallback to check if it's an agent authenticating for its own endpoint
-  const agentMatch = req.path.match(/^\/api\/agents\/([^\/]+)/) || req.path.match(/^\/api\/jobs/);
-  if (agentMatch) {
-    let agentId = agentMatch[1];
-    // For /api/jobs, the agent_id is in the body
-    if (req.path.startsWith('/api/jobs') && req.body && req.body.agent_id) {
-       agentId = req.body.agent_id;
-    }
-    
-    if (agentId) {
+  // 2. Agent Authentication (Scoped Fallback)
+  // Agents are only allowed to access specific routes: 
+  // - Their own details: /api/agents/:id
+  // - Their assigned jobs: /api/agents/:id/jobs
+  // - Global job list (GET only): /api/jobs (legacy support for some agent versions)
+  // - Bundle downloads: /api/agent-bundle.js, /api/backup-bundle.js
+  
+  const agentPathMatch = req.path.match(/^\/api\/agents\/([^\/]+)/);
+  const isAgentBundle = req.path === '/api/agent-bundle.js' || req.path === '/api/backup-bundle.js';
+  const isGlobalJobsGet = req.path === '/api/jobs' && req.method === 'GET';
+  
+  if (agentPathMatch || isAgentBundle || isGlobalJobsGet) {
+    let agentId = agentPathMatch ? agentPathMatch[1] : null;
+
+    // For bundle downloads or global job GET, we might not have agentId in the URL.
+    // If it's a bundle download or global job fetch, we authorize ANY valid agent token.
+    if (isAgentBundle || isGlobalJobsGet) {
+       // We can't easily verify WHICH agent it is without a body or param, 
+       // but we can check if the token matches ANY agent in the system.
+       // Note: This is still restricted to authenticated agents.
+       const agents = db.prepare('SELECT id, token_hash FROM agents').all();
+       for (const agent of agents) {
+         if (agent.token_hash && verifyPassword(token, agent.token_hash)) {
+           return next();
+         }
+       }
+    } else if (agentId) {
+      // Scoped check: Agent is accessing its own /api/agents/:id/... endpoints
       const agent = db.prepare('SELECT token_hash FROM agents WHERE id = ?').get(agentId);
       if (agent && agent.token_hash && verifyPassword(token, agent.token_hash)) {
         return next();
@@ -535,10 +541,14 @@ app.put('/api/agents/:id/restore', (req, res) => {
   // Track which socket triggered this restore so we can scope progress updates
   const triggerSocketId = req.headers['x-socket-id'] || null;
   
+  activeRestores.set(restore_id, {
+    agentId: req.params.id,
+    triggerSocketId: triggerSocketId
+  });
+
   io.to(`agent_${req.params.id}`).emit('agent:trigger_restore', {
     restore_id,
     history_id,
-    trigger_socket_id: triggerSocketId,
     archive_name: history.archive_name,
     dest_type: destination.type,
     dest_config: decrypt(destination.config),
@@ -788,16 +798,36 @@ io.on('connection', (socket) => {
   });
 
   socket.on('agent:restore_status', (data) => {
+    // Provenance check: only allow agents to report restore status
+    if (!socket.isAgent) {
+      console.warn(`[Security] Unauthorized restore status update attempt from socket ${socket.id}`);
+      return;
+    }
+
+    const restoreInfo = activeRestores.get(data.restore_id);
+    if (!restoreInfo) {
+      console.warn(`[Security] Unknown restore_id ${data.restore_id} reported by agent ${socket.agentId}`);
+      return;
+    }
+    if (restoreInfo.agentId !== socket.agentId) {
+      console.warn(`[Security] Agent ${socket.agentId} attempted to forge restore status for ${data.restore_id}`);
+      return;
+    }
+
     // Scope restore status only to the dashboard socket that triggered it,
     // otherwise fall back to broadcasting to all authenticated dashboards.
-    const { trigger_socket_id } = data;
-    if (trigger_socket_id) {
-      io.to(trigger_socket_id).emit('dashboard:restore_status', data);
+    const { triggerSocketId } = restoreInfo;
+    if (triggerSocketId) {
+      io.to(triggerSocketId).emit('dashboard:restore_status', data);
     } else {
       // Fallback: emit only to dashboard sockets (not agents)
       for (const [, sock] of io.sockets.sockets) {
         if (sock.isDashboard) sock.emit('dashboard:restore_status', data);
       }
+    }
+
+    if (data.status === 'success' || data.status === 'failed') {
+      activeRestores.delete(data.restore_id);
     }
   });
 

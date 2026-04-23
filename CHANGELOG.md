@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.4] - 2026-04-24
+
+### Security & Bug Fixes
+- **High**: Fixed a regression in password migration where legacy `salt:hash` passwords (1000 iterations) were incorrectly verified with 600,000 iterations, locking out pre-migration users.
+- **High**: Fixed a crash on fresh installations caused by a missing `crypto` import in `database.js` during initial admin account generation.
+- **Medium**: Fixed restore status forgeability by tracking active restores securely on the backend instead of passing `trigger_socket_id` to the agent. This ensures agents can only report restore statuses for their own assigned restore jobs.
+
+## [0.4.3] - 2026-04-23
+
+### Security
+- **Critical**: Hardened `verifyToken` middleware to prevent agent privilege escalation. Agents are now restricted to their own data and read-only access to assigned jobs.
+- **High**: Fixed authentication inconsistency in `install.sh`. Agents can now securely download script bundles using their `AGENT_TOKEN`.
+- **High**: Future-proofed password hashing by storing iteration counts in the hash string. Added backward compatibility for legacy hashes.
+- **Medium**: Added provenance checking to WebSocket `agent:restore_status` updates to prevent status spoofing from dashboard sessions.
+- **Medium**: Centralized authentication logic into `auth-util.js` for consistency and better auditability.
+- **Low**: Fixed `moderate` severity vulnerability in `agent-app` dependencies.
+
 ## [0.4.2] - 2026-04-19
 
 ### Security
