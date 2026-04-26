@@ -10,6 +10,10 @@ if (!fs.existsSync(dataDir)) {
 }
 const dbPath = path.join(dataDir, 'aegissight.sqlite');
 const db = new Database(dbPath); // Removed verbose for cleaner startup logs
+db.pragma('foreign_keys = ON');
+
+// Clean up expired sessions on startup
+try { db.prepare("DELETE FROM sessions WHERE created_at < datetime('now', '-24 hours')").run(); } catch(e) {}
 
 // Initialize database schema
 db.exec(`
@@ -59,7 +63,15 @@ db.exec(`
     id TEXT PRIMARY KEY,
     username TEXT UNIQUE,
     password_hash TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    role TEXT DEFAULT 'admin'
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -71,15 +83,17 @@ db.exec(`
 // Run migrations for existing databases
 try {
   db.prepare('ALTER TABLE backup_history ADD COLUMN archive_name TEXT').run();
-} catch (e) {
-  // Ignore if column already exists
-}
+} catch (e) {}
+
+try {
+  db.prepare("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'").run();
+} catch (e) {}
 
 // Seed default settings
 const settingsDefaults = {
   domain: process.env.DOMAIN || 'localhost',
   ssl_enabled: 'false',
-  app_version: '0.4.7',
+  app_version: '0.5.0',
   letsencrypt_email: process.env.LETSENCRYPT_EMAIL || ''
 };
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
@@ -100,8 +114,8 @@ const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
 if (userCount === 0) {
   const seedUsername = process.env.ADMIN_USERNAME || 'admin';
   const seedPassword = process.env.ADMIN_PASSWORD || crypto.randomBytes(8).toString('hex');
-  db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)')
-    .run(`user_${Date.now()}`, seedUsername, hashPassword(seedPassword));
+  db.prepare('INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)')
+    .run(`user_${crypto.randomUUID()}`, seedUsername, hashPassword(seedPassword), 'admin');
   console.log(`=============================================================`);
   console.log(`✓ Created initial admin user: ${seedUsername}`);
   console.log(`✓ Default password: ${seedPassword}`);

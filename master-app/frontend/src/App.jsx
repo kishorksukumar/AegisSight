@@ -10,18 +10,21 @@ import SettingsPage from './Settings';
 import Login from './Login';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('aegissight_token'));
+  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('aegissight_loggedIn'));
 
   useEffect(() => {
     const handleStorageChange = () => {
-      setIsAuthenticated(!!localStorage.getItem('aegissight_token'));
+      setIsAuthenticated(!!localStorage.getItem('aegissight_loggedIn'));
     };
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem('aegissight_token');
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    } catch(e) {}
+    localStorage.removeItem('aegissight_loggedIn');
     setIsAuthenticated(false);
   };
 
@@ -55,7 +58,7 @@ function App() {
             </nav>
           </div>
           <div style={{ marginTop: 'auto', padding: '20px 0' }}>
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', padding: '0 16px', marginBottom: '8px' }}>AegisSight v0.2.0</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', padding: '0 16px', marginBottom: '8px' }}>AegisSight v0.5.0</div>
             <button onClick={handleLogout} className="nav-link" style={{ background: 'transparent', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', color: 'var(--text-muted)' }}>
               <LogOut size={20} /> Logout
             </button>

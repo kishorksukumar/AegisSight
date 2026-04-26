@@ -15,12 +15,13 @@ export default function Login({ onLoginSuccess }) {
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ username, password })
       });
       const data = await res.json();
       
       if (res.ok) {
-        localStorage.setItem('aegissight_token', data.token);
+        localStorage.setItem('aegissight_loggedIn', 'true');
         onLoginSuccess();
       } else {
         setError(data.error || 'Invalid credentials');

@@ -132,10 +132,10 @@ export default function Settings() {
     setSslLogs('');
 
     try {
-      const token = localStorage.getItem('aegissight_token');
       const response = await fetch(`${API_URL}/settings/ssl`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
       });
 
       const reader = response.body.getReader();
@@ -159,10 +159,10 @@ export default function Settings() {
     setUpdateLogsVisible(true);
 
     try {
-      const token = localStorage.getItem('aegissight_token');
       const response = await fetch(`${API_URL}/update/apply`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
       });
 
       const reader = response.body.getReader();
@@ -206,10 +206,10 @@ export default function Settings() {
     setRollbackLogs('');
 
     try {
-      const token = localStorage.getItem('aegissight_token');
       const response = await fetch(`${API_URL}/update/rollback`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ filename })
       });
 

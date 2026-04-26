@@ -8,25 +8,51 @@ const { encrypt, decrypt } = require('./crypto-util');
 const { hashPassword, verifyPassword } = require('./auth-util');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
+const cookie = require('cookie');
+const morgan = require('morgan');
 
 const app = express();
 app.use(helmet());
-app.use(cors());
-app.use(express.json());
+app.use(cookieParser());
+app.use(morgan('combined'));
+
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+const checkCors = (origin, cb) => {
+  const domain = getSetting('domain');
+  if (!origin || !domain || domain === 'localhost' || origin.includes(domain) || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Not allowed by CORS'));
+  }
+};
+
+app.use(cors({ origin: checkCors }));
+app.use(express.json({ limit: '100kb' }));
 
 const server = http.createServer(app);
-// CORS origin will be tightened after db/settings is loaded below
 const io = new Server(server, {
   cors: {
-    origin: (origin, cb) => cb(null, true), // tightened at startup
-    methods: ["GET", "POST"]
+    origin: checkCors,
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
 const crypto = require('crypto');
-const activeTokens = new Map();
 const activeRestores = new Map();
-const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
+
+function requireAdmin(req, res, next) {
+  if (req.user && req.user.role === 'admin') {
+    next();
+  } else {
+    res.status(403).json({ error: 'Forbidden: Admin access required' });
+  }
+}
 
 // Password hashing consolidated in auth-util.js
 
@@ -39,24 +65,49 @@ const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts. Please try again later.' }
 });
 
+// General API rate limiter
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 150,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', generalLimiter);
+
+// Strict limiter for state-mutating endpoints
+const strictLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' }
+});
+
 app.post('/api/login', loginLimiter, (req, res) => {
   const { username, password } = req.body;
   
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username || 'admin');
+  const user = db.prepare('SELECT id, password_hash, username, role FROM users WHERE username = ?').get(username || 'admin');
   if (user && verifyPassword(password, user.password_hash)) {
-    const token = crypto.randomBytes(32).toString('hex');
-    activeTokens.set(token, { username: user.username, expiresAt: Date.now() + SESSION_EXPIRY_MS });
-    res.json({ token, username: user.username });
+    const sessionId = crypto.randomUUID();
+    db.prepare('INSERT INTO sessions (id, user_id) VALUES (?, ?)').run(sessionId, user.id);
+    
+    res.cookie('aegissight_session', sessionId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    });
+    res.json({ success: true, username: user.username, role: user.role });
   } else {
     res.status(401).json({ error: 'Invalid credentials' });
   }
 });
 
 app.post('/api/logout', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    activeTokens.delete(token);
+  const sessionId = req.cookies?.aegissight_session;
+  if (sessionId) {
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+    res.clearCookie('aegissight_session');
   }
   res.json({ success: true });
 });
@@ -67,20 +118,35 @@ function verifyToken(req, res, next) {
   if (openPaths.includes(req.path)) {
     return next();
   }
+  let token = req.cookies?.aegissight_session;
+  let isAgent = false;
+  
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!token && authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+    isAgent = true;
+  }
+
+  if (!token) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  const token = authHeader.split(' ')[1];
   
-  // 1. Dashboard User Authentication
-  const session = activeTokens.get(token);
-  if (session) {
-    if (session.expiresAt > Date.now()) {
-      return next();
-    } else {
-      activeTokens.delete(token);
+  if (!isAgent) {
+    // 1. Dashboard User Authentication — with 24h expiry check
+    const session = db.prepare(
+      "SELECT user_id FROM sessions WHERE id = ? AND created_at > datetime('now', '-24 hours')"
+    ).get(token);
+    if (session) {
+      const user = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(session.user_id);
+      if (user) {
+        req.user = user;
+        return next();
+      }
     }
+    // Invalid or expired session, clear cookie
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(token);
+    res.clearCookie('aegissight_session');
+    return res.status(401).json({ error: 'Unauthorized Session' });
   }
 
   // 2. Agent Authentication (Scoped Fallback)
@@ -105,7 +171,7 @@ function verifyToken(req, res, next) {
       }
     } else if (isAgentBundle || isGlobalJobsGet) {
        // Fallback: Full table scan ONLY if agent ID is completely missing (legacy compat)
-       const agents = db.prepare('SELECT id, token_hash FROM agents').all();
+       const agents = db.prepare('SELECT id, token_hash FROM agents LIMIT 50').all();
        for (const agent of agents) {
          if (agent.token_hash && verifyPassword(token, agent.token_hash)) {
            return next();
@@ -124,7 +190,7 @@ app.get('/api/users', (req, res) => {
   res.json(users);
 });
 
-app.post('/api/users', (req, res) => {
+app.post('/api/users', strictLimiter, requireAdmin, (req, res) => {
   const { username, password } = req.body;
   if (!username || !/^[a-zA-Z0-9_-]{3,32}$/.test(username)) {
     return res.status(400).json({ error: 'Username must be 3-32 alphanumeric characters.' });
@@ -134,23 +200,25 @@ app.post('/api/users', (req, res) => {
   }
   try {
     const stmt = db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)');
-    stmt.run(`user_${Date.now()}`, username, hashPassword(password));
+    stmt.run(`user_${crypto.randomUUID()}`, username, hashPassword(password));
     res.status(201).json({ success: true });
   } catch (err) {
     res.status(400).json({ error: err.message.includes('UNIQUE') ? 'Username taken' : err.message });
   }
 });
 
-app.put('/api/users/:id/reset', (req, res) => {
+app.put('/api/users/:id/reset', strictLimiter, requireAdmin, (req, res) => {
   const { newPassword } = req.body;
   if (!newPassword || newPassword.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   }
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), req.params.id);
+  // Invalidate all existing sessions for this user
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
-app.delete('/api/users/:id', (req, res) => {
+app.delete('/api/users/:id', strictLimiter, requireAdmin, (req, res) => {
   // Prevent deleting the very last user
   const count = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
   if (count <= 1) return res.status(400).json({ error: 'Cannot delete the only remaining user.' });
@@ -159,15 +227,8 @@ app.delete('/api/users/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// ── Settings APIs ─────────────────────────────────────────────────────────────
-const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-
-function getSetting(key) {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-  return row ? row.value : null;
-}
 
 function setSetting(key, value) {
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
@@ -180,21 +241,21 @@ app.get('/api/settings', (req, res) => {
   res.json(result);
 });
 
-app.post('/api/settings/domain', (req, res) => {
+app.post('/api/settings/domain', requireAdmin, (req, res) => {
   const { domain } = req.body;
   if (!domain || !domain.match(/^[a-zA-Z0-9.-]+$/)) return res.status(400).json({ error: 'Valid domain is required' });
   setSetting('domain', domain);
   res.json({ success: true, domain });
 });
 
-app.post('/api/settings/email', (req, res) => {
+app.post('/api/settings/email', requireAdmin, (req, res) => {
   const { email } = req.body;
   if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return res.status(400).json({ error: 'Valid email is required' });
   setSetting('letsencrypt_email', email);
   res.json({ success: true });
 });
 
-app.post('/api/settings/ssl', async (req, res) => {
+app.post('/api/settings/ssl', strictLimiter, requireAdmin, async (req, res) => {
   const domain = getSetting('domain');
   const email  = getSetting('letsencrypt_email');
 
@@ -328,7 +389,7 @@ app.get('/api/update/status', async (req, res) => {
   }
 });
 
-app.post('/api/update/apply', (req, res) => {
+app.post('/api/update/apply', strictLimiter, requireAdmin, (req, res) => {
   const repoRoot = path.join(__dirname, '../..');
 
   // Streaming response
@@ -405,7 +466,7 @@ app.get('/api/update/backups', (req, res) => {
   }
 });
 
-app.post('/api/update/snapshot', (req, res) => {
+app.post('/api/update/snapshot', requireAdmin, (req, res) => {
   try {
     const { snapName, timestamp, commit } = createSnapshot('manual');
     res.json({ success: true, filename: snapName, timestamp, commit });
@@ -414,7 +475,7 @@ app.post('/api/update/snapshot', (req, res) => {
   }
 });
 
-app.post('/api/update/rollback', (req, res) => {
+app.post('/api/update/rollback', strictLimiter, requireAdmin, (req, res) => {
   const { filename } = req.body;
   if (!filename) return res.status(400).json({ error: 'filename is required' });
 
@@ -467,7 +528,7 @@ app.get('/api/agents', (req, res) => {
   res.json(agents);
 });
 
-app.post('/api/agents', (req, res) => {
+app.post('/api/agents', strictLimiter, requireAdmin, (req, res) => {
   const { id } = req.body;
   if (!id) return res.status(400).json({ error: 'Agent ID is required' });
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
@@ -555,13 +616,32 @@ app.put('/api/agents/:id/restore', (req, res) => {
   res.json({ success: true, restore_id });
 });
 
-app.post('/api/jobs', (req, res) => {
+app.post('/api/jobs', requireAdmin, (req, res) => {
   const { id, agent_id, name, source_paths, destination_id, backup_type, cron_schedule } = req.body;
+  
+  if (!name || !agent_id || !destination_id || !cron_schedule || !source_paths) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  if (!Array.isArray(source_paths) || source_paths.length === 0) {
+    return res.status(400).json({ error: 'source_paths must be a non-empty array' });
+  }
+  if (typeof cron_schedule !== 'string' || cron_schedule.split(' ').length < 5) {
+    return res.status(400).json({ error: 'Invalid cron_schedule format' });
+  }
+
+  const agent = db.prepare('SELECT id FROM agents WHERE id = ?').get(agent_id);
+  if (!agent) return res.status(400).json({ error: 'Agent not found' });
+  
+  const dest = db.prepare('SELECT id FROM destinations WHERE id = ?').get(destination_id);
+  if (!dest) return res.status(400).json({ error: 'Destination not found' });
+
+  const jobId = typeof id === 'string' && id.startsWith('job_') ? id : `job_${crypto.randomUUID()}`;
+
   const stmt = db.prepare(`
     INSERT INTO backup_jobs (id, agent_id, name, source_paths, destination_id, backup_type, cron_schedule)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run(id, agent_id, name, JSON.stringify(source_paths), destination_id, backup_type || 'full', cron_schedule);
+  stmt.run(jobId, agent_id, name, JSON.stringify(source_paths), destination_id, backup_type || 'full', cron_schedule);
   res.status(201).json({ success: true });
 });
 
@@ -585,6 +665,9 @@ app.get('/api/destinations', (req, res) => {
     if (rawConfig) {
       try {
         parsedConfig = JSON.parse(rawConfig);
+        // Redact secrets before sending to frontend
+        if (parsedConfig.secretAccessKey) parsedConfig.secretAccessKey = '********';
+        if (parsedConfig.password) parsedConfig.password = '********';
       } catch (err) {
         console.error(`Failed to parse config for destination ${d.id}`);
       }
@@ -595,7 +678,7 @@ app.get('/api/destinations', (req, res) => {
   }));
 });
 
-app.post('/api/destinations', (req, res) => {
+app.post('/api/destinations', requireAdmin, (req, res) => {
   const { id, name, type, config } = req.body;
   const stmt = db.prepare(`INSERT INTO destinations (id, name, type, config) VALUES (?, ?, ?, ?)`);
   stmt.run(id, name, type, encrypt(JSON.stringify(config)));
@@ -635,7 +718,7 @@ app.get('/api/install.sh', (req, res) => {
     : `https://${configuredDomain}`;
 
   const installScript = `#!/bin/bash
-# AegisSight Agent Install Script v0.4.1
+# AegisSight Agent Install Script v0.5.0
 if [ -z "$AGENT_ID" ] || [ -z "$AGENT_TOKEN" ]; then
   echo "Error: AGENT_ID and AGENT_TOKEN must be set as environment variables."
   exit 1
@@ -682,17 +765,24 @@ app.get('/api/backup-bundle.js', (req, res) => {
 
 // WebSocket for Agent Communications
 io.use((socket, next) => {
-  const token = socket.handshake.auth.token;
-  if (!token) return next(new Error('Authentication error'));
+  let sessionId;
+  if (socket.request.headers.cookie) {
+    const cookies = cookie.parse(socket.request.headers.cookie);
+    sessionId = cookies.aegissight_session;
+  }
   
-  const session = activeTokens.get(token);
-  if (session && session.expiresAt > Date.now()) {
-    socket.isDashboard = true;
-    return next();
+  if (sessionId) {
+    const session = db.prepare('SELECT user_id FROM sessions WHERE id = ?').get(sessionId);
+    if (session) {
+      socket.isDashboard = true;
+      return next();
+    }
   }
 
+  const token = socket.handshake.auth.token;
   const agentId = socket.handshake.auth.agent_id;
-  if (agentId) {
+  
+  if (agentId && token) {
     const agent = db.prepare('SELECT token_hash FROM agents WHERE id = ?').get(agentId);
     if (agent && agent.token_hash && verifyPassword(token, agent.token_hash)) {
       socket.isAgent = true;

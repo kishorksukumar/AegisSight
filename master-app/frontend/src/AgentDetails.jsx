@@ -59,8 +59,7 @@ export default function AgentDetails() {
 
   useEffect(() => {
     fetchAll();
-    const token = localStorage.getItem('aegissight_token');
-    const socket = io({ auth: { token } });
+    const socket = io({ withCredentials: true });
     socketRef.current = socket;
     socket.on('dashboard:agents_updated', fetchAgent);
     socket.on('dashboard:history_updated', fetchHistory);

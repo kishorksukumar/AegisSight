@@ -14,9 +14,11 @@
     "@aws-sdk/lib-storage": "^3.1029.0",
     "archiver": "^7.0.1",
     "axios": "^1.15.0",
+    "basic-ftp": "^5.3.0",
     "dotenv": "^17.4.1",
     "node-cron": "^4.2.1",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "ssh2-sftp-client": "^12.1.1"
   },
   "overrides": {
     "fast-xml-parser": "^5.7.0"

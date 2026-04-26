@@ -23,8 +23,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    const token = localStorage.getItem('aegissight_token');
-    const socket = io({ auth: { token } });
+    const socket = io({ withCredentials: true });
     socket.on('dashboard:agents_updated', fetchData);
     socket.on('dashboard:history_updated', fetchData);
     return () => socket.disconnect();
