@@ -574,7 +574,7 @@ app.get('/api/agents/:id/jobs', (req, res) => {
   res.json(jobs.map(j => ({ ...j, dest_config: j.dest_config ? decrypt(j.dest_config) : null })));
 });
 
-app.put('/api/agents/:id/restore', (req, res) => {
+app.put('/api/agents/:id/restore', strictLimiter, requireAdmin, (req, res) => {
   const { history_id, target_paths, restore_dir } = req.body;
   
   if (!history_id) return res.status(400).json({ error: 'history_id is required' });
@@ -685,7 +685,7 @@ app.post('/api/destinations', requireAdmin, (req, res) => {
   res.status(201).json({ success: true });
 });
 
-app.post('/api/destinations/verify', async (req, res) => {
+app.post('/api/destinations/verify', strictLimiter, requireAdmin, async (req, res) => {
   const { type, config } = req.body;
   if (type === 's3') {
     try {
