@@ -31,7 +31,7 @@ const checkCors = (origin, cb) => {
   }
 };
 
-app.use(cors({ origin: checkCors }));
+app.use(cors({ origin: checkCors, credentials: true }));
 app.use(express.json({ limit: '100kb' }));
 
 const server = http.createServer(app);
@@ -548,7 +548,7 @@ app.post('/api/agents', strictLimiter, requireAdmin, (req, res) => {
 });
 
 app.get('/api/agents/:id', (req, res) => {
-  const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id);
+  const agent = db.prepare('SELECT id, hostname, ip_address, platform, status, last_seen, cpu_load, ram_usage, uptime FROM agents WHERE id = ?').get(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
   res.json(agent);
 });
@@ -919,6 +919,14 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
+    if (socket.isAgent && socket.agentId) {
+      try {
+        db.prepare("UPDATE agents SET status = 'offline' WHERE id = ?").run(socket.agentId);
+        io.emit('dashboard:agents_updated');
+      } catch(err) {
+        console.error('Error marking agent offline:', err);
+      }
+    }
   });
 });
 

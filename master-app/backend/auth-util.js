@@ -10,6 +10,7 @@ function hashPassword(password, iterations = DEFAULT_ITERATIONS) {
 }
 
 function verifyPassword(password, storedHash) {
+  if (!password || typeof password !== 'string') return false;
   if (!storedHash) return false;
   const parts = storedHash.split(':');
   
