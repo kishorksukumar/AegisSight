@@ -1,19 +1,21 @@
-# AegisSight v0.4.7
+# AegisSight v0.5.0
 
 > Secure, self-hosted offsite backup management platform with real-time agent monitoring.
 
 ---
 
-## What's New in v0.4
+## What's New in v0.5
 
-- 🔄 **Automated Remote Restore** — Stream `.tar.gz` archives securely from S3/FTP directly down to the Agent and extract them on the fly.
-- 🛡️ **Hardened Security** — AES-256-GCM encryption for credentials, per-agent secure authentication tokens, and strict RCE mitigations against malicious payloads.
-- 🐳 **Docker-based self-hosting** — full production stack with one command
-- 🔒 **Auto SSL** via Let's Encrypt & Certbot directly from the dashboard
-- ⚙️ **Settings page** — configure domain, email, and enable HTTPS in the UI
-- 👤 **User Management** — multi-user authentication with PBKDF2-hashed passwords
-- 📊 **Agent Detail pages** — per-server CPU, RAM, Uptime, job history, and live Restore Tracking
-- 🔑 **JWT-authenticated dashboard** with login/logout flow
+- 🔐 **Production Security Hardening** — Complete auth overhaul: httpOnly cookie sessions, RBAC, 24h session expiry, PBKDF2-600k password hashing with timing-safe comparison.
+- 🛡️ **Comprehensive RBAC** — `requireAdmin` middleware enforced on all 12 sensitive API endpoints. Scoped agent auth prevents privilege escalation.
+- 🔒 **AES-256-GCM Encryption** — Versioned payloads with auth tag verification for all stored credentials. Secrets redacted in API responses.
+- 🚦 **Rate Limiting** — Tiered protection: login (10/15min), general (150/min), strict (20/min) per IP.
+- 🌐 **Security Headers** — HSTS, CSP, X-Frame-Options, X-Content-Type-Options via Nginx + Helmet.
+- 🐳 **Hardened Docker** — Non-root container (`USER node`), `.dockerignore` files prevent secret leaks in images.
+- 📝 **Audit Logging** — Structured HTTP request logging via `morgan`.
+- 🔄 **Automated Remote Restore** — Stream `.tar.gz` archives from S3/FTP/SFTP directly to agents with provenance-checked status updates.
+- ⚙️ **In-Dashboard Updates** — One-click pull, rebuild, and rollback with automatic DB snapshots.
+- 📊 **Real-time Monitoring** — Per-agent CPU, RAM, Uptime telemetry via WebSocket.
 
 ---
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.5.0] - 2026-04-26
+
+### Security — Major Hardening Release
+- **Critical**: Replaced in-memory token-based authentication with persistent SQLite-backed sessions using `httpOnly` / `SameSite=strict` cookies. Tokens are no longer stored in `localStorage`.
+- **Critical**: Fixed `Settings.jsx` streaming endpoints (SSL, Update, Rollback) that were broken by the auth migration — they still referenced the removed `localStorage.getItem('aegissight_token')` pattern, causing all three admin operations to fail with 401.
+- **High**: Implemented Role-Based Access Control (RBAC) with `requireAdmin` middleware enforced on all 12 state-mutating and administrative API endpoints.
+- **High**: Added `credentials: true` to Socket.IO CORS config, fixing dashboard WebSocket connections that were silently failing after the cookie auth migration.
+- **High**: Added 24-hour session expiry with database-level enforcement (`created_at > datetime('now', '-24 hours')`) and automatic cleanup of expired sessions on server startup.
+- **High**: Session invalidation on password reset — changing a user's password now deletes all their existing sessions.
+- **High**: Enabled `PRAGMA foreign_keys = ON` in SQLite so `ON DELETE CASCADE` on the sessions table actually works.
+- **Medium**: Added `requireAdmin` to `POST /api/settings/domain`, `POST /api/settings/email`, and `POST /api/update/snapshot` which were previously unprotected.
+- **Medium**: Domain-restricted CORS policy using dynamic database configuration instead of permissive `*`.
+- **Medium**: Added tiered rate limiting — login (10 req/15min), general API (150 req/min), strict (20 req/min) for state-mutating endpoints.
+- **Medium**: Secret redaction in `GET /api/destinations` — `secretAccessKey` and `password` fields are now masked before being sent to the frontend.
+- **Medium**: Added comprehensive security headers (HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) to both Nginx configurations.
+- **Low**: Request body size limit set to `100kb` to prevent payload abuse.
+- **Low**: Added `credentials: 'include'` to `Login.jsx` fetch call for dev-mode compatibility.
+
+### Infrastructure
+- **Backend Dockerfile** now runs as non-root `node` user with proper `chown` for the data directory.
+- **`.dockerignore`** files added to backend, frontend, and project root — prevents `.env`, `*.sqlite`, and `data/` from leaking into Docker images.
+- **Structured audit logging** via `morgan('combined')` middleware for HTTP request tracking.
+
+### Housekeeping
+- Unified version string to `v0.5.0` across all 7 locations (package.json ×2, database.js, App.jsx, install.sh, server.js install script).
+- 0 dependency vulnerabilities across all 3 packages (backend, agent, frontend).
+
 ## [0.4.7] - 2026-04-24
 
 ### Bug Fixes
