@@ -18,6 +18,14 @@
 - **Low**: Request body size limit set to `100kb` to prevent payload abuse.
 - **Low**: Added `credentials: 'include'` to `Login.jsx` fetch call for dev-mode compatibility.
 
+### Bug Fixes (Post-Audit Functional Review)
+- **Critical**: Fixed a server crash in `verifyPassword` where a missing or `null` password field during login threw a `TypeError`.
+- **High**: Added `credentials: true` to the Express CORS configuration so browsers correctly store `Set-Cookie` headers in cross-origin environments.
+- **High**: Fixed agent WebSocket disconnection tracking. Agents are now correctly marked as `offline` in the database when they disconnect.
+- **High**: Added missing `requireAdmin` and rate-limiting middlewares to `PUT /api/agents/:id/restore` to prevent unauthorized dashboard users from triggering remote archive extractions.
+- **High**: Added missing `requireAdmin` and rate-limiting middlewares to `POST /api/destinations/verify` to prevent SSRF abuse.
+- **Medium**: Fixed a data leak in `GET /api/agents/:id` where the agent's internal PBKDF2 `token_hash` was inadvertently exposed via a `SELECT *` query.
+
 ### Infrastructure
 - **Backend Dockerfile** now runs as non-root `node` user with proper `chown` for the data directory.
 - **`.dockerignore`** files added to backend, frontend, and project root — prevents `.env`, `*.sqlite`, and `data/` from leaking into Docker images.
