@@ -11,8 +11,11 @@ const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const cookie = require('cookie');
 const morgan = require('morgan');
+const { sendNotification, checkTelemetryAlerts, testSmtpSettings, testTelegramSettings } = require('./notification-util');
+
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cookieParser());
 app.use(morgan('combined'));
@@ -254,6 +257,35 @@ app.post('/api/settings/email', requireAdmin, (req, res) => {
   setSetting('letsencrypt_email', email);
   res.json({ success: true });
 });
+
+app.post('/api/settings/notifications', requireAdmin, (req, res) => {
+  const settings = req.body;
+  for (const [key, val] of Object.entries(settings)) {
+    if (key.startsWith('notification_')) {
+      setSetting(key, String(val));
+    }
+  }
+  res.json({ success: true });
+});
+
+app.post('/api/settings/notifications/test-smtp', requireAdmin, async (req, res) => {
+  try {
+    await testSmtpSettings(req.body);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/settings/notifications/test-telegram', requireAdmin, async (req, res) => {
+  try {
+    await testTelegramSettings(req.body);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 
 app.post('/api/settings/ssl', strictLimiter, requireAdmin, async (req, res) => {
   const domain = getSetting('domain');
@@ -524,8 +556,20 @@ app.post('/api/update/rollback', strictLimiter, requireAdmin, (req, res) => {
 });
 
 app.get('/api/agents', (req, res) => {
-  const agents = db.prepare('SELECT id, hostname, ip_address, platform, status, last_seen FROM agents').all();
-  res.json(agents);
+  const agents = db.prepare('SELECT id, name, hostname, ip_address, platform, status, last_seen, uptime FROM agents').all();
+  const withHistory = agents.map(agent => {
+    try {
+      const history = db.prepare(`
+        SELECT hour_bucket, status FROM agent_status_history 
+        WHERE agent_id = ? 
+        ORDER BY hour_bucket DESC LIMIT 24
+      `).all(agent.id);
+      return { ...agent, status_history: history.reverse() };
+    } catch(e) {
+      return { ...agent, status_history: [] };
+    }
+  });
+  res.json(withHistory);
 });
 
 app.post('/api/agents', strictLimiter, requireAdmin, (req, res) => {
@@ -548,9 +592,50 @@ app.post('/api/agents', strictLimiter, requireAdmin, (req, res) => {
 });
 
 app.get('/api/agents/:id', (req, res) => {
-  const agent = db.prepare('SELECT id, hostname, ip_address, platform, status, last_seen, cpu_load, ram_usage, uptime FROM agents WHERE id = ?').get(req.params.id);
+  const agent = db.prepare('SELECT id, name, hostname, ip_address, platform, status, last_seen, cpu_load, ram_usage, uptime FROM agents WHERE id = ?').get(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
   res.json(agent);
+});
+
+app.post('/api/agents/:id/rename', requireAdmin, (req, res) => {
+  const { name } = req.body;
+  try {
+    db.prepare('UPDATE agents SET name = ? WHERE id = ?').run(name || null, req.params.id);
+    io.emit('dashboard:agents_updated');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/agents/:id/status-history', (req, res) => {
+  try {
+    // Return last 24 records from status history
+    const history = db.prepare(`
+      SELECT hour_bucket, status FROM agent_status_history 
+      WHERE agent_id = ? 
+      ORDER BY hour_bucket DESC LIMIT 24
+    `).all(req.params.id);
+    
+    // Return sorted in chronological order (oldest to newest)
+    res.json(history.reverse());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/downtime', (req, res) => {
+  try {
+    const events = db.prepare(`
+      SELECT e.*, a.name as agent_name, a.hostname as agent_hostname
+      FROM agent_downtime_events e
+      JOIN agents a ON e.agent_id = a.id
+      ORDER BY e.start_time DESC LIMIT 20
+    `).all();
+    res.json(events);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/agents/:id/history', (req, res) => {
@@ -718,7 +803,7 @@ app.get('/api/install.sh', (req, res) => {
     : `https://${configuredDomain}`;
 
   const installScript = `#!/bin/bash
-# AegisSight Agent Install Script v0.5.0
+# AegisSight Agent Install Script v0.6.0
 if [ -z "$AGENT_ID" ] || [ -z "$AGENT_TOKEN" ]; then
   echo "Error: AGENT_ID and AGENT_TOKEN must be set as environment variables."
   exit 1
@@ -762,6 +847,38 @@ app.get('/api/backup-bundle.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript');
   res.send(fs.readFileSync(backupPath, 'utf8'));
 });
+
+function logAgentStatus(agentId, status) {
+  try {
+    const hourBucket = new Date().toISOString().slice(0, 13) + ':00:00';
+    const existing = db.prepare('SELECT status FROM agent_status_history WHERE agent_id = ? AND hour_bucket = ?').get(agentId, hourBucket);
+    if (!existing) {
+      db.prepare('INSERT INTO agent_status_history (agent_id, hour_bucket, status) VALUES (?, ?, ?)').run(agentId, hourBucket, status);
+    } else if (status === 'offline' && existing.status === 'online') {
+      db.prepare('UPDATE agent_status_history SET status = ? WHERE agent_id = ? AND hour_bucket = ?').run(status, agentId, hourBucket);
+    }
+  } catch (err) {
+    console.error('Error logging agent status history:', err);
+  }
+}
+
+function recordDowntimeEvent(agentId, newStatus) {
+  try {
+    const current = db.prepare('SELECT status FROM agents WHERE id = ?').get(agentId);
+    const oldStatus = current ? current.status : 'offline';
+    
+    if (oldStatus === 'online' && newStatus === 'offline') {
+      const openEvent = db.prepare('SELECT id FROM agent_downtime_events WHERE agent_id = ? AND end_time IS NULL').get(agentId);
+      if (!openEvent) {
+        db.prepare('INSERT INTO agent_downtime_events (agent_id, start_time) VALUES (?, CURRENT_TIMESTAMP)').run(agentId);
+      }
+    } else if (oldStatus === 'offline' && newStatus === 'online') {
+      db.prepare('UPDATE agent_downtime_events SET end_time = CURRENT_TIMESTAMP WHERE agent_id = ? AND end_time IS NULL').run(agentId);
+    }
+  } catch (err) {
+    console.error('Error recording downtime event:', err);
+  }
+}
 
 // WebSocket for Agent Communications
 io.use((socket, next) => {
@@ -815,8 +932,10 @@ io.on('connection', (socket) => {
     `);
     
     try {
+      recordDowntimeEvent(data.id, 'online');
       stmt.run(data);
       console.log(`Agent ${data.hostname} (${data.id}) registered/heartbeat.`);
+      logAgentStatus(data.id, 'online');
       // Emit update to dashboard
       io.emit('dashboard:agents_updated');
     } catch(err) {
@@ -826,6 +945,12 @@ io.on('connection', (socket) => {
 
   socket.on('agent:telemetry', (data) => {
     if (!socket.isAgent || socket.agentId !== data.id) return;
+    
+    const current = db.prepare('SELECT status FROM agents WHERE id = ?').get(data.id);
+    if (current && current.status !== 'online') {
+      recordDowntimeEvent(data.id, 'online');
+      db.prepare("UPDATE agents SET status = 'online' WHERE id = ?").run(data.id);
+    }
     
     // data: { id, cpu_load, ram_usage, uptime }
     const stmt = db.prepare(`
@@ -838,7 +963,13 @@ io.on('connection', (socket) => {
     `);
     try {
       stmt.run(data);
+      logAgentStatus(data.id, 'online');
       io.emit('dashboard:agents_updated');
+
+      // Dispatch load alerts
+      const agent = db.prepare('SELECT hostname FROM agents WHERE id = ?').get(data.id);
+      const hostname = agent ? agent.hostname : data.id;
+      checkTelemetryAlerts(data.id, hostname, data.cpu_load, data.ram_usage);
     } catch(err) {
       console.error('Error updating agent telemetry:', err);
     }
@@ -855,12 +986,24 @@ io.on('connection', (socket) => {
     }
     
     // Check if history exists
-    const exists = db.prepare('SELECT id FROM backup_history WHERE id = ?').get(history_id);
+    const exists = db.prepare('SELECT id, status FROM backup_history WHERE id = ?').get(history_id);
     if (!exists) {
       db.prepare(`
         INSERT INTO backup_history (id, job_id, status, progress, file_size, logs, archive_name)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(history_id, job_id, status, progress, file_size, logs, archive_name || null);
+
+      if (status === 'running') {
+        const job = db.prepare('SELECT name FROM backup_jobs WHERE id = ?').get(job_id);
+        const agent = db.prepare('SELECT hostname FROM agents WHERE id = (SELECT agent_id FROM backup_jobs WHERE id = ?)').get(job_id);
+        const jobName = job ? job.name : 'Unknown Job';
+        const hostname = agent ? agent.hostname : 'Unknown Agent';
+
+        sendNotification(
+          `Backup Job Started: ${jobName}`,
+          `Backup job "${jobName}" has started running on agent "${hostname}".`
+        );
+      }
     } else {
       let query = `UPDATE backup_history SET status = ?, progress = ?, logs = ?`;
       const params = [status, progress, logs];
@@ -878,6 +1021,26 @@ io.on('connection', (socket) => {
       query += ` WHERE id = ?`;
       params.push(history_id);
       db.prepare(query).run(...params);
+
+      // Check if job transitioned to completion
+      if (exists.status === 'running' && (status === 'success' || status === 'failed')) {
+        const job = db.prepare('SELECT name FROM backup_jobs WHERE id = ?').get(job_id);
+        const agent = db.prepare('SELECT hostname FROM agents WHERE id = (SELECT agent_id FROM backup_jobs WHERE id = ?)').get(job_id);
+        const jobName = job ? job.name : 'Unknown Job';
+        const hostname = agent ? agent.hostname : 'Unknown Agent';
+
+        if (status === 'success') {
+          sendNotification(
+            `Backup Job Succeeded: ${jobName}`,
+            `Backup job "${jobName}" completed successfully on agent "${hostname}".\nArchive: ${archive_name || 'N/A'} (${file_size ? (file_size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A'}).`
+          );
+        } else {
+          sendNotification(
+            `Backup Job FAILED: ${jobName}`,
+            `Backup job "${jobName}" failed on agent "${hostname}".\nLogs:\n${logs || 'No log details available.'}`
+          );
+        }
+      }
     }
     
     io.emit('dashboard:history_updated', data);
@@ -921,14 +1084,51 @@ io.on('connection', (socket) => {
     console.log('Client disconnected:', socket.id);
     if (socket.isAgent && socket.agentId) {
       try {
+        recordDowntimeEvent(socket.agentId, 'offline');
         db.prepare("UPDATE agents SET status = 'offline' WHERE id = ?").run(socket.agentId);
+        logAgentStatus(socket.agentId, 'offline');
         io.emit('dashboard:agents_updated');
+
+        const agent = db.prepare('SELECT hostname FROM agents WHERE id = ?').get(socket.agentId);
+        const hostname = agent ? agent.hostname : socket.agentId;
+        sendNotification(
+          `Agent Server Offline: ${hostname}`,
+          `The server connection for agent "${hostname}" (${socket.agentId}) was lost.`
+        );
       } catch(err) {
         console.error('Error marking agent offline:', err);
       }
     }
   });
 });
+
+// Stale agent checker: runs every 30 seconds to mark offline and notify
+setInterval(() => {
+  try {
+    const staleAgents = db.prepare(`
+      SELECT id, hostname FROM agents 
+      WHERE status = 'online' AND last_seen < datetime('now', '-30 seconds')
+    `).all();
+
+    for (const agent of staleAgents) {
+      recordDowntimeEvent(agent.id, 'offline');
+      db.prepare("UPDATE agents SET status = 'offline' WHERE id = ?").run(agent.id);
+      logAgentStatus(agent.id, 'offline');
+      console.log(`Agent ${agent.hostname} (${agent.id}) went stale, marking offline.`);
+
+      sendNotification(
+        `Agent Server Offline (Timeout): ${agent.hostname}`,
+        `Agent "${agent.hostname}" (${agent.id}) has stopped responding. No heartbeats received in over 30 seconds.`
+      );
+    }
+
+    if (staleAgents.length > 0) {
+      io.emit('dashboard:agents_updated');
+    }
+  } catch (err) {
+    console.error('Error checking stale agents:', err);
+  }
+}, 30000);
 
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {

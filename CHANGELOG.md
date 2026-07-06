@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0] - 2026-07-07
+
+### Added
+- **Alert Notifications**: Built a centralized notification dispatcher supporting **SMTP Email** (via `nodemailer`) and **Telegram Bot API** channels.
+- **Alert Toggles & Thresholds**: Configurable triggers for backup starts/failures, CPU load spikes, RAM usage limit checks, and offline timeout events. Added a dedicated configuration card inside Settings.
+- **Liveness Availability Timeline**: Added a 24-hour visual heartbeat grid representing hourly status samples with interactive hover tooltips.
+- **Server Rename Feature**: Assign custom display names directly from the main Dashboard table and Agents view.
+- **Dedicated Events Log**: Added an "Events" sidebar menu path linked to a full-screen outage log detailing downtime start/end times and precise downtime durations.
+- **Details Page Scheduler**: Schedule backup cron jobs for a specific agent directly from its Details card.
+
+### Fixed
+- **Docker Caching**: Replaced named compose volumes with direct host-mapped directories for Vite build files, resolving caching issues.
+- **Uptime Monitor**: Restored the dashboard uptime column by fetching agent telemetry uptime in `/api/agents`.
+- **Detail Screen Render**: Fixed a blank detail screen error by importing `IconButton` in `AgentDetails.jsx`.
+- **Unblocked Enrolled Agents List**: Restored Agents page table listing even if no storage destinations are configured.
+
 ## [0.5.0] - 2026-04-26
 
 ### Security — Major Hardening Release

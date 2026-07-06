@@ -93,7 +93,7 @@ try {
 const settingsDefaults = {
   domain: process.env.DOMAIN || 'localhost',
   ssl_enabled: 'false',
-  app_version: '0.5.0',
+  app_version: '0.6.0',
   letsencrypt_email: process.env.LETSENCRYPT_EMAIL || ''
 };
 const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
@@ -107,6 +107,27 @@ try { db.exec(`ALTER TABLE agents ADD COLUMN cpu_load TEXT;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN ram_usage TEXT;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN uptime INTEGER;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN token_hash TEXT;`); } catch(e) {}
+try { db.exec(`ALTER TABLE agents ADD COLUMN name TEXT;`); } catch(e) {}
+
+// Create agent status history table for liveness timeline
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_status_history (
+    agent_id TEXT,
+    hour_bucket TEXT,
+    status TEXT,
+    PRIMARY KEY (agent_id, hour_bucket)
+  );
+`);
+
+// Create table for logging server downtime events
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_downtime_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT,
+    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_time DATETIME
+  );
+`);
 
 // Password hashing consolidated in auth-util.js
 

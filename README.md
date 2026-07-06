@@ -1,8 +1,16 @@
-# AegisSight v0.5.0
+# AegisSight v0.6.0
 
 > Secure, self-hosted offsite backup management platform with real-time agent monitoring.
 
 ---
+
+## What's New in v0.6
+
+- 📈 **Uptime & Liveness Timeline** — A 24-hour interactive heartbeat timeline grid showing hourly status samples and dynamic tooltips on the Dashboard and Agent Details views.
+- 🏷️ **Server Renaming** — Assign custom friendly names (e.g. `Primary DB Instance`) directly from the dashboard and agents overview.
+- 📋 **System Outage Events Log** — Dedicated sidebar section mapping server outages, downtime start/end timestamps, resolution status, and precise downtime durations.
+- 🔔 **SMTP & Telegram Alerts** — Centralized notification dispatcher alert triggers for backup starts/failures, CPU/RAM thresholds, and offline timeouts.
+- 📅 **Agent Job Scheduler** — Plan backup jobs for a specific agent directly from its Details page.
 
 ## What's New in v0.5
 

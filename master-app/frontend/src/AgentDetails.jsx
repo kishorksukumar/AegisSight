@@ -1,11 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { apiFetch } from './api';
 import { io } from 'socket.io-client';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  ArrowLeft, Server, Cpu, MemoryStick, Clock, Wifi, Activity
-} from 'lucide-react';
+  Box, Grid, Card, CardContent, Typography, Button, Paper,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  Chip, LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, Alert, CircularProgress, useTheme, Tooltip, MenuItem, FormControl, InputLabel, Select, IconButton
+} from '@mui/material';
+import {
+  ArrowBack as ArrowBackIcon,
+  Dns as ServerIcon,
+  DeveloperBoard as CpuIcon,
+  Memory as MemoryIcon,
+  AccessTime as ClockIcon,
+  CheckCircle as CheckCircleIcon,
+  Cancel as CancelIcon,
+  Settings as SettingsIcon,
+  History as HistoryIcon,
+  SettingsBackupRestore as RestoreIcon,
+  Edit as EditIcon,
+  Add as AddIcon
+} from '@mui/icons-material';
 
 const API_URL = "/api";
 
@@ -17,68 +34,110 @@ function formatUptime(seconds) {
   return `${d > 0 ? d + 'd ' : ''}${h}h ${m}m`;
 }
 
-function MetricGauge({ label, value, unit, color = 'var(--accent-color)', icon }) {
+function MetricGauge({ label, value, unit, color = 'primary.main', icon }) {
   const pct = parseFloat(value) || 0;
   const isPercentage = unit === '%';
+  const theme = useTheme();
+
   return (
-    <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
-        {icon}
-        <span style={{ fontSize: '0.85rem' }}>{label}</span>
-      </div>
-      <div style={{ fontSize: '2rem', fontWeight: '700', color }}>
-        {value !== null && value !== undefined ? `${value}${unit}` : 'N/A'}
-      </div>
-      {isPercentage && (
-        <div style={{ height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px' }}>
-          <div style={{
-            width: `${Math.min(pct, 100)}%`,
-            height: '100%',
-            borderRadius: '4px',
-            background: pct > 85 ? '#ef4444' : pct > 65 ? '#eab308' : color,
-            transition: 'width 0.5s ease'
-          }} />
-        </div>
-      )}
-    </div>
+    <Card sx={{ height: '100%' }}>
+      <CardContent sx={{ p: 2.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary', mb: 1.5 }}>
+          {icon}
+          <Typography variant="caption" sx={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {label}
+          </Typography>
+        </Box>
+        <Typography variant="h4" sx={{ fontWeight: 700, mb: 1.5, color: theme.palette.mode === 'dark' ? '#fff' : 'text.primary' }}>
+          {value !== null && value !== undefined ? `${value}${unit}` : 'N/A'}
+        </Typography>
+        {isPercentage && (
+          <Box sx={{ width: '100%' }}>
+            <LinearProgress
+              variant="determinate"
+              value={Math.min(pct, 100)}
+              sx={{
+                height: 6,
+                borderRadius: 3,
+                bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                '& .MuiLinearProgress-bar': {
+                  bgcolor: pct > 85 ? 'error.main' : pct > 65 ? 'warning.main' : color,
+                }
+              }}
+            />
+          </Box>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
 export default function AgentDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const theme = useTheme();
+  
   const [agent, setAgent] = useState(null);
   const [history, setHistory] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [destinations, setDestinations] = useState([]);
+  const [statusHistory, setStatusHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // Rename states
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+
+  // Job creation states
+  const [jobOpen, setJobOpen] = useState(false);
+  const [jobForm, setJobForm] = useState({
+    id: '',
+    name: 'Scheduled Backup',
+    destination_id: '',
+    source_paths: '["/var/www/html", "/etc"]',
+    backup_type: 'full',
+    cron_schedule: '0 2 * * *'
+  });
+
   const [restoreModal, setRestoreModal] = useState(null);
   const [restoreForm, setRestoreForm] = useState({ target_paths: '', restore_dir: '' });
   const [activeRestores, setActiveRestores] = useState({});
-  const socketRef = React.useRef(null);
+  const socketRef = useRef(null);
 
   useEffect(() => {
     fetchAll();
     const socket = io({ withCredentials: true });
     socketRef.current = socket;
-    socket.on('dashboard:agents_updated', fetchAgent);
+    
+    socket.on('dashboard:agents_updated', () => {
+      fetchAgent();
+      fetchStatusHistory();
+    });
     socket.on('dashboard:history_updated', fetchHistory);
     socket.on('dashboard:restore_status', (data) => {
       setActiveRestores(prev => ({ ...prev, [data.restore_id]: data }));
     });
-    return () => { socket.disconnect(); socketRef.current = null; };
+    
+    return () => { 
+      socket.disconnect(); 
+      socketRef.current = null; 
+    };
   }, [id]);
 
   const fetchAll = async () => {
     setLoading(true);
-    await Promise.all([fetchAgent(), fetchHistory(), fetchJobs()]);
+    await Promise.all([fetchAgent(), fetchHistory(), fetchJobs(), fetchDestinations(), fetchStatusHistory()]);
     setLoading(false);
   };
 
   const fetchAgent = async () => {
     try {
       const res = await apiFetch(`${API_URL}/agents/${id}`);
-      if (res.ok) setAgent(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setAgent(data);
+        setNewName(data.name || '');
+      }
     } catch (e) {}
   };
 
@@ -94,6 +153,77 @@ export default function AgentDetails() {
       const res = await apiFetch(`${API_URL}/agents/${id}/jobs`);
       if (res.ok) setJobs(await res.json());
     } catch (e) {}
+  };
+
+  const fetchDestinations = async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/destinations`);
+      if (res.ok) {
+        const data = await res.json();
+        setDestinations(data);
+        if (data.length > 0) {
+          setJobForm(f => ({ ...f, destination_id: data[0].id }));
+        }
+      }
+    } catch (e) {}
+  };
+
+  const fetchStatusHistory = async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/agents/${id}/status-history`);
+      if (res.ok) setStatusHistory(await res.json());
+    } catch (e) {}
+  };
+
+  const handleRenameSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await apiFetch(`${API_URL}/agents/${id}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName })
+      });
+      if (res.ok) {
+        setRenameOpen(false);
+        fetchAgent();
+      }
+    } catch (err) {
+      alert('Failed to rename agent');
+    }
+  };
+
+  const handleJobSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      JSON.parse(jobForm.source_paths);
+      const res = await apiFetch(`${API_URL}/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...jobForm,
+          id: `job_${Date.now()}`,
+          agent_id: id,
+          source_paths: JSON.parse(jobForm.source_paths)
+        })
+      });
+      if (res.ok) {
+        setJobOpen(false);
+        setJobForm({
+          id: '',
+          name: 'Scheduled Backup',
+          destination_id: destinations.length > 0 ? destinations[0].id : '',
+          source_paths: '["/var/www/html", "/etc"]',
+          backup_type: 'full',
+          cron_schedule: '0 2 * * *'
+        });
+        fetchJobs();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to schedule job');
+      }
+    } catch (err) {
+      alert("Error: Source paths must be a valid JSON array like [\"/etc\", \"/var/log\"]");
+    }
   };
 
   const handleRestoreSubmit = async (e) => {
@@ -131,275 +261,618 @@ export default function AgentDetails() {
     }
   };
 
+  const getStatusChip = (status) => {
+    let color = 'default';
+    if (status === 'online' || status === 'success' || status === 'active' || status === 'ACTIVE') color = 'success';
+    if (status === 'offline' || status === 'failed' || status === 'paused' || status === 'PAUSED') color = 'error';
+    if (status === 'running' || status === 'starting') color = 'primary';
+    
+    return (
+      <Chip 
+        label={status.toUpperCase()} 
+        color={color} 
+        size="small" 
+        variant="outlined"
+        sx={{ fontWeight: 600, borderRadius: '6px' }}
+      />
+    );
+  };
+
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px', color: 'var(--text-muted)' }}>
-      Loading agent data...
-    </div>
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: 2 }}>
+      <CircularProgress color="primary" />
+      <Typography variant="body2" sx={{ color: 'text.secondary' }}>Loading agent telemetry...</Typography>
+    </Box>
   );
 
   if (!agent) return (
-    <div>
-      <button onClick={() => navigate('/')} className="btn-primary" style={{ marginBottom: '20px' }}>
-        ← Back to Dashboard
-      </button>
-      <div className="glass-card" style={{ textAlign: 'center', color: 'var(--danger)' }}>Agent not found.</div>
-    </div>
+    <Box>
+      <Button 
+        variant="outlined" 
+        onClick={() => navigate('/')} 
+        startIcon={<ArrowBackIcon />}
+        sx={{ mb: 3 }}
+      >
+        Back to Dashboard
+      </Button>
+      <Alert severity="error">Agent details could not be found or loaded.</Alert>
+    </Box>
   );
 
   const successCount = history.filter(h => h.status === 'success').length;
   const failedCount = history.filter(h => h.status === 'failed').length;
 
-  return (
-    <div>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
-        <button
-          onClick={() => navigate('/')}
-          style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          <ArrowLeft size={16} /> Back
-        </button>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Server size={24} color="var(--accent-color)" />
-            <h2 style={{ margin: 0 }}>{agent.hostname}</h2>
-            <span className={`status-badge status-${agent.status}`}>{agent.status.toUpperCase()}</span>
-          </div>
-          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>
-            {agent.ip_address} &bull; {agent.platform} &bull; Last seen {agent.last_seen ? formatDistanceToNow(new Date(agent.last_seen + 'Z'), { addSuffix: true }) : 'never'}
-          </div>
-        </div>
-      </div>
+  const renderUptimeTimeline = () => {
+    const totalBlocks = 24;
+    const historyBlocks = statusHistory || [];
+    const paddingCount = Math.max(0, totalBlocks - historyBlocks.length);
+    
+    const blocks = [];
+    for (let i = 0; i < paddingCount; i++) {
+      blocks.push({ hour: 'N/A', status: 'unknown' });
+    }
+    historyBlocks.forEach((h) => {
+      let formattedHour = 'Unknown Hour';
+      try {
+        const dateObj = new Date(h.hour_bucket + 'Z');
+        formattedHour = dateObj.toLocaleString([], { hour: '2-digit', minute: '2-digit' });
+      } catch (e) {}
+      blocks.push({ hour: formattedHour, status: h.status });
+    });
 
-      {/* Live Telemetry Gauges */}
-      <h3 style={{ marginBottom: '14px', color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Live Telemetry</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', marginBottom: '30px' }}>
-        <MetricGauge
-          label="CPU Load (1m avg)"
-          value={agent.cpu_load}
-          unit=""
-          color="#eab308"
-          icon={<Cpu size={16} />}
-        />
-        <MetricGauge
-          label="RAM Usage"
-          value={agent.ram_usage}
-          unit="%"
-          color="var(--accent-color)"
-          icon={<MemoryStick size={16} />}
-        />
-        <MetricGauge
-          label="Server Uptime"
-          value={formatUptime(agent.uptime)}
-          unit=""
-          color="#10b981"
-          icon={<Clock size={16} />}
-        />
-        <MetricGauge
-          label="Successful Backups"
-          value={successCount}
-          unit=""
-          color="#10b981"
-          icon={<Activity size={16} />}
-        />
-        <MetricGauge
-          label="Failed Backups"
-          value={failedCount}
-          unit=""
-          color={failedCount > 0 ? 'var(--danger)' : '#10b981'}
-          icon={<Activity size={16} />}
-        />
-        <MetricGauge
-          label="Scheduled Jobs"
-          value={jobs.length}
-          unit=""
-          color="var(--accent-color)"
-          icon={<Wifi size={16} />}
-        />
-      </div>
+    return (
+      <Box sx={{ mt: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+          <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Liveness Timeline (Last 24 Hours)
+          </Typography>
+          <Typography variant="caption" sx={{ fontWeight: 700, color: agent.status === 'online' ? 'success.main' : 'error.main' }}>
+            {agent.status === 'online' ? '● ONLINE' : '● OFFLINE'}
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          {blocks.map((b, idx) => {
+            let color = theme.palette.mode === 'dark' ? '#334155' : '#cbd5e1';
+            if (b.status === 'online') color = '#10b981';
+            if (b.status === 'offline') color = '#f43f5e';
+            
+            return (
+              <Tooltip key={idx} title={b.status === 'unknown' ? 'No history recorded' : `${b.hour}: ${b.status.toUpperCase()}`} arrow>
+                <Box 
+                  sx={{ 
+                    flex: 1, 
+                    height: 24, 
+                    bgcolor: color, 
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    transition: 'transform 0.15s ease',
+                    '&:hover': { transform: 'scaleY(1.2)', opacity: 0.9 }
+                  }} 
+                />
+              </Tooltip>
+            );
+          })}
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1, color: 'text.secondary' }}>
+          <Typography variant="caption">24h ago</Typography>
+          <Typography variant="caption">Now</Typography>
+        </Box>
+      </Box>
+    );
+  };
+
+  return (
+    <Box>
+      {/* Back & Actions Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, mb: 4, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Button
+            variant="outlined"
+            onClick={() => navigate('/')}
+            startIcon={<ArrowBackIcon />}
+            sx={{ borderColor: theme.palette.mode === 'dark' ? 'rgba(69, 162, 158, 0.3)' : 'rgba(0,0,0,0.15)', color: 'text.primary' }}
+          >
+            Back
+          </Button>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <ServerIcon sx={{ color: 'primary.main', fontSize: 28 }} />
+            <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: "'Outfit', sans-serif", color: theme.palette.mode === 'dark' ? '#fff' : 'text.primary' }}>
+              {agent.name || agent.hostname || 'Enrolled Server'}
+            </Typography>
+            <IconButton onClick={() => { setNewName(agent.name || ''); setRenameOpen(true); }} size="small" sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
+              <EditIcon fontSize="small" />
+            </IconButton>
+            {getStatusChip(agent.status)}
+          </Box>
+        </Box>
+
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<AddIcon />}
+          onClick={() => setJobOpen(true)}
+          sx={{ fontWeight: 600 }}
+        >
+          Schedule Backup Job
+        </Button>
+      </Box>
+
+      {/* Server Metadata & Availability Timeline Card */}
+      <Card sx={{ mb: 4 }}>
+        <CardContent sx={{ p: 3 }}>
+          <Grid container spacing={4}>
+            
+            {/* Metadata column */}
+            <Grid item xs={12} md={6}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 2, color: 'primary.main', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Server Specifications
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                    AGENT IDENTIFIER (ID)
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 700, fontFamily: 'monospace' }}>
+                    {agent.id}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                    SERVER IP ADDRESS
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 700, color: 'primary.main', fontFamily: 'monospace' }}>
+                    {agent.ip_address || 'Unknown IP'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                    HOSTNAME
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {agent.hostname || 'N/A'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                    OPERATING SYSTEM
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'capitalize' }}>
+                    {agent.platform || 'N/A'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                    LAST HEARTBEAT RECORDED
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {agent.last_seen ? formatDistanceToNow(new Date(agent.last_seen + 'Z'), { addSuffix: true }) : 'Never seen'}
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Grid>
+
+            {/* Timeline column */}
+            <Grid item xs={12} md={6} sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              {renderUptimeTimeline()}
+            </Grid>
+
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Live Telemetry Gauges Grid */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+          <MetricGauge
+            label="CPU Load (1m)"
+            value={agent.cpu_load}
+            unit=""
+            color="warning.main"
+            icon={<CpuIcon fontSize="small" />}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+          <MetricGauge
+            label="RAM Usage"
+            value={agent.ram_usage}
+            unit="%"
+            color="primary.main"
+            icon={<MemoryIcon fontSize="small" />}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={4} lg={3}>
+          <MetricGauge
+            label="Server Uptime"
+            value={formatUptime(agent.uptime)}
+            unit=""
+            color="success.main"
+            icon={<ClockIcon fontSize="small" />}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+          <MetricGauge
+            label="Success Jobs"
+            value={successCount}
+            unit=""
+            color="success.main"
+            icon={<CheckCircleIcon fontSize="small" />}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={4} lg={2}>
+          <MetricGauge
+            label="Failed Jobs"
+            value={failedCount}
+            unit=""
+            color="error.main"
+            icon={<CancelIcon fontSize="small" />}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={4} lg={1}>
+          <MetricGauge
+            label="Jobs"
+            value={jobs.length}
+            unit=""
+            color="primary.main"
+            icon={<SettingsIcon fontSize="small" />}
+          />
+        </Grid>
+      </Grid>
 
       {/* Active Restores */}
       {Object.values(activeRestores).length > 0 && (
-        <div className="glass-card" style={{ marginBottom: '24px' }}>
-          <h2 style={{ marginBottom: '16px' }}>Active Restores</h2>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Status</th>
-                  <th>Progress</th>
-                  <th>Logs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.values(activeRestores).map(restore => (
-                  <tr key={restore.restore_id}>
-                    <td>
-                      <span className={`status-badge status-${restore.status}`}>
-                        {restore.status.toUpperCase()}
-                      </span>
-                    </td>
-                    <td>
-                      {restore.status === 'running' || restore.status === 'starting' ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={{ flex: 1, background: 'rgba(255,255,255,0.1)', borderRadius: '4px', height: '6px' }}>
-                            <div style={{ width: `${restore.progress}%`, background: 'var(--accent-color)', height: '100%', borderRadius: '4px' }} />
-                          </div>
-                          <span style={{ fontSize: '0.8rem' }}>{restore.progress}%</span>
-                        </div>
-                      ) : restore.status === 'success' ? '100%' : '—'}
-                    </td>
-                    <td style={{ maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                      {restore.logs}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <Card sx={{ mb: 4 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <RestoreIcon color="primary" /> Active Restores
+            </Typography>
+            <TableContainer component={Paper} elevation={0} sx={{ bgcolor: 'transparent' }}>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Status</TableCell>
+                    <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Progress</TableCell>
+                    <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Logs</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {Object.values(activeRestores).map(restore => (
+                    <TableRow key={restore.restore_id}>
+                      <TableCell>{getStatusChip(restore.status)}</TableCell>
+                      <TableCell sx={{ minWidth: 150 }}>
+                        {restore.status === 'running' || restore.status === 'starting' ? (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                            <LinearProgress 
+                              variant="determinate" 
+                              value={restore.progress} 
+                              sx={{ flexGrow: 1, height: 6, borderRadius: 3 }}
+                            />
+                            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                              {restore.progress}%
+                            </Typography>
+                          </Box>
+                        ) : restore.status === 'success' ? (
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'success.main' }}>100%</Typography>
+                        ) : (
+                          <Typography variant="body2">—</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'text.secondary', fontSize: '0.85rem' }}>
+                        {restore.logs}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
       )}
 
       {/* Backup History */}
-      <div className="glass-card" style={{ marginBottom: '24px' }}>
-        <h2 style={{ marginBottom: '16px' }}>Backup History</h2>
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Job Name</th>
-                <th>Status</th>
-                <th>Progress</th>
-                <th>Started</th>
-                <th>Ended</th>
-                <th>Log</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map(item => (
-                <tr key={item.id}>
-                  <td><strong>{item.job_name}</strong></td>
-                  <td>
-                    <span className={`status-badge status-${item.status}`}>
-                      {item.status.toUpperCase()}
-                    </span>
-                  </td>
-                  <td>
-                    {item.status === 'running' ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ flex: 1, background: 'rgba(255,255,255,0.1)', borderRadius: '4px', height: '6px' }}>
-                          <div style={{ width: `${item.progress}%`, background: 'var(--accent-color)', height: '100%', borderRadius: '4px' }} />
-                        </div>
-                        <span style={{ fontSize: '0.8rem' }}>{item.progress}%</span>
-                      </div>
-                    ) : item.status === 'success' ? '100%' : '—'}
-                  </td>
-                  <td style={{ color: 'var(--text-muted)' }}>
-                    {formatDistanceToNow(new Date(item.start_time + 'Z'), { addSuffix: true })}
-                  </td>
-                  <td style={{ color: 'var(--text-muted)' }}>
-                    {item.end_time ? formatDistanceToNow(new Date(item.end_time + 'Z'), { addSuffix: true }) : '—'}
-                  </td>
-                  <td style={{ maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                    {item.logs}
-                  </td>
-                  <td>
-                    {item.status === 'success' && (
-                      <button className="btn-primary" style={{ padding: '4px 8px', fontSize: '0.8rem' }} onClick={() => setRestoreModal(item)}>Restore</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {history.length === 0 && (
-                <tr>
-                  <td colSpan="7" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    No backup history for this agent yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <Card sx={{ mb: 4 }}>
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, display: 'flex', alignItems: 'center', gap: 1, fontFamily: "'Outfit', sans-serif" }}>
+            <HistoryIcon color="primary" /> Backup History
+          </Typography>
+          <TableContainer component={Paper} elevation={0} sx={{ bgcolor: 'transparent' }}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Job Name</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Progress</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Started</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Ended</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Log</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {history.map(item => (
+                  <TableRow key={item.id}>
+                    <TableCell sx={{ fontWeight: 600 }}>{item.job_name}</TableCell>
+                    <TableCell>{getStatusChip(item.status)}</TableCell>
+                    <TableCell>
+                      {item.status === 'running' ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 120 }}>
+                          <LinearProgress 
+                            variant="determinate" 
+                            value={item.progress} 
+                            sx={{ flexGrow: 1, height: 6, borderRadius: 3 }}
+                          />
+                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                            {item.progress}%
+                          </Typography>
+                        </Box>
+                      ) : item.status === 'success' ? (
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: 'success.main' }}>100%</Typography>
+                      ) : (
+                        <Typography variant="body2">—</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell sx={{ color: 'text.secondary' }}>
+                      {formatDistanceToNow(new Date(item.start_time + 'Z'), { addSuffix: true })}
+                    </TableCell>
+                    <TableCell sx={{ color: 'text.secondary' }}>
+                      {item.end_time ? formatDistanceToNow(new Date(item.end_time + 'Z'), { addSuffix: true }) : '—'}
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'text.secondary', fontSize: '0.85rem' }}>
+                      {item.logs}
+                    </TableCell>
+                    <TableCell>
+                      {item.status === 'success' && (
+                        <Button 
+                          variant="contained" 
+                          color="primary" 
+                          size="small"
+                          onClick={() => setRestoreModal(item)}
+                          sx={{ py: 0.5 }}
+                        >
+                          Restore
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {history.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                      No backup history for this agent yet.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
 
       {/* Scheduled Jobs */}
-      <div className="glass-card">
-        <h2 style={{ marginBottom: '16px' }}>Scheduled Jobs</h2>
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Schedule</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map(job => (
-                <tr key={job.id}>
-                  <td><strong>{job.name}</strong></td>
-                  <td>{job.backup_type || 'full'}</td>
-                  <td style={{ fontFamily: 'monospace', color: 'var(--accent-color)' }}>{job.cron_schedule}</td>
-                  <td>
-                    <span className={`status-badge status-${job.is_active ? 'online' : 'offline'}`}>
-                      {job.is_active ? 'ACTIVE' : 'PAUSED'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {jobs.length === 0 && (
-                <tr>
-                  <td colSpan="4" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    No jobs scheduled for this agent.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <Card sx={{ mb: 4 }}>
+        <CardContent sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2, display: 'flex', alignItems: 'center', gap: 1, fontFamily: "'Outfit', sans-serif" }}>
+            <SettingsIcon color="primary" /> Scheduled Jobs
+          </Typography>
+          <TableContainer component={Paper} elevation={0} sx={{ bgcolor: 'transparent' }}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Name</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Type</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Schedule</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {jobs.map(job => (
+                  <TableRow key={job.id}>
+                    <TableCell sx={{ fontWeight: 600 }}>{job.name}</TableCell>
+                    <TableCell sx={{ textTransform: 'capitalize' }}>{job.backup_type || 'full'}</TableCell>
+                    <TableCell sx={{ fontFamily: 'monospace', color: 'primary.main' }}>{job.cron_schedule}</TableCell>
+                    <TableCell>{getStatusChip(job.is_active ? 'active' : 'paused')}</TableCell>
+                  </TableRow>
+                ))}
+                {jobs.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                      No jobs scheduled for this agent.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </CardContent>
+      </Card>
 
-      {/* Restore Modal */}
-      {restoreModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="glass-card" style={{ width: '500px', maxWidth: '90%' }}>
-            <h2 style={{ marginBottom: '16px', color: 'var(--accent-color)' }}>Restore Backup</h2>
-            <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>
-              Restore from <strong>{restoreModal.job_name}</strong> ({formatDistanceToNow(new Date(restoreModal.start_time + 'Z'), { addSuffix: true })})
-            </p>
-            <form onSubmit={handleRestoreSubmit}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)' }}>Restore Directory (Optional)</label>
-                <input 
-                  type="text" 
-                  value={restoreForm.restore_dir} 
-                  onChange={e => setRestoreForm({...restoreForm, restore_dir: e.target.value})} 
-                  placeholder="e.g. /opt/aegissight-restore"
-                  style={{ width: '100%', padding: '10px', background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '4px' }} 
-                />
-                <small style={{ color: 'var(--text-muted)' }}>Leave blank to overwrite files in their original absolute paths.</small>
-              </div>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)' }}>Specific Paths to Restore (Optional)</label>
-                <input 
-                  type="text" 
-                  value={restoreForm.target_paths} 
-                  onChange={e => setRestoreForm({...restoreForm, target_paths: e.target.value})} 
-                  placeholder="e.g. var/www/html/index.php, etc/nginx"
-                  style={{ width: '100%', padding: '10px', background: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '4px' }} 
-                />
-                <small style={{ color: 'var(--text-muted)' }}>Comma separated. Note: paths in tar archives typically do not have a leading slash.</small>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
-                <button type="button" onClick={() => setRestoreModal(null)} style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'white', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" className="btn-primary" style={{ padding: '8px 16px' }}>Trigger Restore</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      {/* Restore Dialog Modal */}
+      <Dialog 
+        open={Boolean(restoreModal)} 
+        onClose={() => setRestoreModal(null)}
+        PaperProps={{
+          sx: {
+            border: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(69, 162, 158, 0.2)' : 'rgba(0, 0, 0, 0.08)'}`,
+            bgcolor: 'background.paper',
+            borderRadius: 3
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, fontFamily: "'Outfit', sans-serif", color: theme.palette.mode === 'dark' ? '#fff' : 'text.primary' }}>
+          Restore Backup
+        </DialogTitle>
+        <DialogContent>
+          {restoreModal && (
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+              Restore files from <strong>{restoreModal.job_name}</strong> created {formatDistanceToNow(new Date(restoreModal.start_time + 'Z'), { addSuffix: true })}.
+            </Typography>
+          )}
+          <Box component="form" sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+            <TextField
+              label="Restore Directory (Optional)"
+              value={restoreForm.restore_dir}
+              onChange={e => setRestoreForm({...restoreForm, restore_dir: e.target.value})}
+              placeholder="e.g. /opt/aegissight-restore"
+              fullWidth
+              helperText="Leave blank to overwrite files in their original locations."
+            />
+            <TextField
+              label="Specific Paths to Restore (Optional)"
+              value={restoreForm.target_paths}
+              onChange={e => setRestoreForm({...restoreForm, target_paths: e.target.value})}
+              placeholder="e.g. var/www/html/index.php, etc/nginx"
+              fullWidth
+              helperText="Comma separated. Note: paths in tar archives typically do not have a leading slash."
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button onClick={() => setRestoreModal(null)} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleRestoreSubmit} variant="contained" color="primary">
+            Trigger Restore
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Rename Dialog Modal */}
+      <Dialog 
+        open={renameOpen} 
+        onClose={() => setRenameOpen(false)}
+        PaperProps={{
+          sx: {
+            border: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(69, 162, 158, 0.2)' : 'rgba(0, 0, 0, 0.08)'}`,
+            bgcolor: 'background.paper',
+            borderRadius: 3,
+            minWidth: 320
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, fontFamily: "'Outfit', sans-serif" }}>
+          Rename Server Agent
+        </DialogTitle>
+        <DialogContent>
+          <Box component="form" onSubmit={handleRenameSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+            <TextField
+              label="Friendly Display Name"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="e.g. Production Database Server"
+              fullWidth
+              autoFocus
+              required
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button onClick={() => setRenameOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleRenameSubmit} variant="contained" color="primary">
+            Save Name
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Schedule Backup Job Dialog Modal */}
+      <Dialog 
+        open={jobOpen} 
+        onClose={() => setJobOpen(false)}
+        PaperProps={{
+          sx: {
+            border: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(69, 162, 158, 0.2)' : 'rgba(0, 0, 0, 0.08)'}`,
+            bgcolor: 'background.paper',
+            borderRadius: 3,
+            minWidth: 450
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, fontFamily: "'Outfit', sans-serif" }}>
+          Schedule Backup Job
+        </DialogTitle>
+        <DialogContent>
+          {destinations.length === 0 ? (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              No storage destinations available. Please configure a destination in the 'Destinations' settings tab first.
+            </Alert>
+          ) : (
+            <Box component="form" onSubmit={handleJobSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+              <TextField
+                label="Job Name"
+                value={jobForm.name}
+                onChange={e => setJobForm({ ...jobForm, name: e.target.value })}
+                placeholder="e.g. Daily Backup"
+                fullWidth
+                required
+              />
+
+              <FormControl fullWidth>
+                <InputLabel id="dest-select-label">Target Storage Destination</InputLabel>
+                <Select
+                  labelId="dest-select-label"
+                  label="Target Storage Destination"
+                  value={jobForm.destination_id}
+                  onChange={e => setJobForm({ ...jobForm, destination_id: e.target.value })}
+                  required
+                >
+                  {destinations.map(d => (
+                    <MenuItem key={d.id} value={d.id}>
+                      {d.name} [{d.type.toUpperCase()}]
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <FormControl fullWidth>
+                <InputLabel id="type-select-label">Backup Type</InputLabel>
+                <Select
+                  labelId="type-select-label"
+                  label="Backup Type"
+                  value={jobForm.backup_type}
+                  onChange={e => setJobForm({ ...jobForm, backup_type: e.target.value })}
+                  required
+                >
+                  <MenuItem value="full">Full Archive (tar.gz)</MenuItem>
+                  <MenuItem value="incremental">Incremental Backup</MenuItem>
+                </Select>
+              </FormControl>
+
+              <TextField
+                label="Source Paths (JSON Array)"
+                value={jobForm.source_paths}
+                onChange={e => setJobForm({ ...jobForm, source_paths: e.target.value })}
+                helperText="Enter a JSON array of directories, e.g. ['/var/www/html', '/etc/nginx']"
+                fullWidth
+                required
+                inputProps={{ style: { fontFamily: 'monospace' } }}
+              />
+
+              <TextField
+                label="Cron Schedule"
+                value={jobForm.cron_schedule}
+                onChange={e => setJobForm({ ...jobForm, cron_schedule: e.target.value })}
+                placeholder="e.g. 0 2 * * *"
+                helperText="Standard cron syntax: minute hour day-of-month month day-of-week"
+                fullWidth
+                required
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button onClick={() => setJobOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleJobSubmit} 
+            variant="contained" 
+            color="primary"
+            disabled={destinations.length === 0}
+          >
+            Schedule Job
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 }

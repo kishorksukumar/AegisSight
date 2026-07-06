@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
+import { Box, Paper, TextField, Button, Typography, Alert, CircularProgress, useTheme } from '@mui/material';
+import { Shield as ShieldIcon } from '@mui/icons-material';
 
 export default function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const theme = useTheme();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -34,45 +37,116 @@ export default function Login({ onLoginSuccess }) {
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0b0c10' }}>
-      <div className="glass-card" style={{ width: '400px', padding: '40px', textAlign: 'center' }}>
-        <h2 style={{ marginBottom: '10px', color: 'var(--accent-color)' }}>AegisSight</h2>
-        <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>Secure System Access</p>
+    <Box sx={{ 
+      height: '100vh', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      bgcolor: 'background.default',
+      backgroundImage: theme.palette.mode === 'dark' 
+        ? 'radial-gradient(circle at top right, rgba(102, 252, 241, 0.08), transparent 400px), radial-gradient(circle at bottom left, rgba(69, 162, 158, 0.08), transparent 400px)'
+        : 'none'
+    }}>
+      <Paper 
+        component="form"
+        onSubmit={handleLogin}
+        sx={{ 
+          width: '100%',
+          maxWidth: '400px', 
+          p: 5, 
+          borderRadius: 4,
+          textAlign: 'center',
+          boxShadow: theme.palette.mode === 'dark' 
+            ? '0 8px 32px 0 rgba(0, 0, 0, 0.37)' 
+            : '0 8px 32px 0 rgba(0, 0, 0, 0.08)',
+          bgcolor: theme.palette.mode === 'dark' ? 'rgba(31, 40, 51, 0.6)' : '#ffffff',
+          backdropFilter: theme.palette.mode === 'dark' ? 'blur(12px)' : 'none',
+          border: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(69, 162, 158, 0.2)' : 'rgba(0, 0, 0, 0.08)'}`
+        }}
+      >
+        <Box sx={{ display: 'inline-flex', p: 1.5, borderRadius: '50%', bgcolor: 'rgba(102, 252, 241, 0.1)', mb: 2 }}>
+          <ShieldIcon sx={{ color: 'primary.main', fontSize: 40 }} />
+        </Box>
         
-        <form onSubmit={handleLogin}>
-          <div style={{ marginBottom: '15px', textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)' }}>Username</label>
-            <input 
-              type="text" 
-              value={username} 
-              onChange={e => setUsername(e.target.value)} 
-              disabled={loading}
-              autoComplete="username"
-              required
-              style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '4px' }} 
-            />
-          </div>
+        <Typography variant="h4" sx={{ fontWeight: 700, fontFamily: "'Outfit', sans-serif", color: theme.palette.mode === 'dark' ? '#fff' : 'text.primary', mb: 1 }}>
+          AegisSight
+        </Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 4 }}>
+          Secure System Access
+        </Typography>
+        
+        {error && (
+          <Alert severity="error" sx={{ mb: 3, textAlign: 'left', borderRadius: '8px' }}>
+            {error}
+          </Alert>
+        )}
 
-          <div style={{ marginBottom: '20px', textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)' }}>Password</label>
-            <input 
-              type="password" 
-              value={password} 
-              onChange={e => setPassword(e.target.value)} 
-              disabled={loading}
-              autoComplete="current-password"
-              required
-              style={{ width: '100%', padding: '12px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '4px' }} 
-            />
-          </div>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <TextField 
+            label="Username" 
+            variant="outlined" 
+            value={username} 
+            onChange={e => setUsername(e.target.value)} 
+            disabled={loading}
+            autoComplete="username"
+            required
+            fullWidth
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                '& fieldset': {
+                  borderColor: theme.palette.mode === 'dark' ? 'rgba(69, 162, 158, 0.3)' : 'rgba(0, 0, 0, 0.15)',
+                },
+                '&:hover fieldset': {
+                  borderColor: 'primary.main',
+                },
+              }
+            }}
+          />
+
+          <TextField 
+            label="Password" 
+            type="password"
+            variant="outlined" 
+            value={password} 
+            onChange={e => setPassword(e.target.value)} 
+            disabled={loading}
+            autoComplete="current-password"
+            required
+            fullWidth
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                '& fieldset': {
+                  borderColor: theme.palette.mode === 'dark' ? 'rgba(69, 162, 158, 0.3)' : 'rgba(0, 0, 0, 0.15)',
+                },
+                '&:hover fieldset': {
+                  borderColor: 'primary.main',
+                },
+              }
+            }}
+          />
           
-          {error && <div style={{ color: 'var(--danger)', marginBottom: '20px', fontSize: '0.9rem' }}>{error}</div>}
-          
-          <button type="submit" className="btn-primary" style={{ width: '100%', padding: '12px' }} disabled={loading}>
-            {loading ? 'Authenticating...' : 'Secure Login'}
-          </button>
-        </form>
-      </div>
-    </div>
+          <Button 
+            type="submit" 
+            variant="contained" 
+            color="primary" 
+            size="large"
+            disabled={loading}
+            sx={{ 
+              py: 1.5,
+              fontWeight: 700,
+              boxShadow: theme.palette.mode === 'dark' ? '0 4px 15px rgba(102, 252, 241, 0.2)' : 'none',
+              bgcolor: 'primary.main',
+              color: 'primary.contrastText',
+              '&:hover': {
+                bgcolor: 'secondary.main',
+                boxShadow: theme.palette.mode === 'dark' ? '0 6px 20px rgba(102, 252, 241, 0.3)' : 'none',
+              }
+            }}
+          >
+            {loading ? <CircularProgress size={24} color="inherit" /> : 'Secure Login'}
+          </Button>
+        </Box>
+      </Paper>
+    </Box>
   );
 }
