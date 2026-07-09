@@ -31,6 +31,7 @@ export default function Agents() {
   
   const [agents, setAgents] = useState([]);
   const [destinations, setDestinations] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTargetId, setRenameTargetId] = useState('');
@@ -128,6 +129,7 @@ export default function Agents() {
 
   const fetchData = async () => {
     try {
+      setLoading(true);
       const [aRes, dRes] = await Promise.all([
         apiFetch(`${API_URL}/agents`),
         apiFetch(`${API_URL}/destinations`)
@@ -143,6 +145,8 @@ export default function Agents() {
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -316,7 +320,14 @@ export default function Agents() {
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 3, display: 'flex', alignItems: 'center', gap: 1, fontFamily: "'Outfit', sans-serif" }}>
             <ServerIcon color="primary" /> Enrolled Server Agents
           </Typography>
-          {agents.length === 0 ? (
+          {loading ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 6, gap: 2 }}>
+              <CircularProgress size={40} />
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Retrieving server agents...
+              </Typography>
+            </Box>
+          ) : agents.length === 0 ? (
             <Alert severity="info">
               No servers enrolled yet. Click 'Add New Server' above to generate an installation command.
             </Alert>

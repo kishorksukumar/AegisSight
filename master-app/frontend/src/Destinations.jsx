@@ -20,6 +20,7 @@ const API_URL = '/api';
 
 export default function Destinations() {
   const [destinations, setDestinations] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const theme = useTheme();
   
@@ -44,6 +45,7 @@ export default function Destinations() {
 
   const fetchDestinations = async () => {
     try {
+      setLoading(true);
       const res = await apiFetch(`${API_URL}/destinations`);
       if (res.ok) {
         const data = await res.json();
@@ -51,6 +53,8 @@ export default function Destinations() {
       }
     } catch(e) {
       console.error(e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -359,41 +363,54 @@ export default function Destinations() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {destinations.map(d => (
-                  <TableRow key={d.id}>
-                    <TableCell sx={{ color: 'text.secondary' }}>{d.id}</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>{d.name}</TableCell>
-                    <TableCell>
-                      <Chip 
-                        icon={d.type === 's3' ? <CloudIcon /> : <PowerIcon />}
-                        label={d.type.toUpperCase()} 
-                        color="primary"
-                        variant="outlined"
-                        size="small"
-                        sx={{ fontWeight: 600, borderRadius: '6px' }}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <IconButton 
-                        color="error" 
-                        size="small" 
-                        onClick={() => {
-                          setDeleteTargetId(d.id);
-                          setDeleteError('');
-                          setDeleteOpen(true);
-                        }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {destinations.length === 0 && (
+                {loading ? (
                   <TableRow>
-                    <TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                      No destinations configured.
+                    <TableCell colSpan={4} align="center" sx={{ py: 6 }}>
+                      <CircularProgress size={30} />
+                      <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+                        Loading storage destinations...
+                      </Typography>
                     </TableCell>
                   </TableRow>
+                ) : (
+                  <>
+                    {destinations.map(d => (
+                      <TableRow key={d.id}>
+                        <TableCell sx={{ color: 'text.secondary' }}>{d.id}</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>{d.name}</TableCell>
+                        <TableCell>
+                          <Chip 
+                            icon={d.type === 's3' ? <CloudIcon /> : <PowerIcon />}
+                            label={d.type.toUpperCase()} 
+                            color="primary"
+                            variant="outlined"
+                            size="small"
+                            sx={{ fontWeight: 600, borderRadius: '6px' }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <IconButton 
+                            color="error" 
+                            size="small" 
+                            onClick={() => {
+                              setDeleteTargetId(d.id);
+                              setDeleteError('');
+                              setDeleteOpen(true);
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {destinations.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                          No destinations configured.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </>
                 )}
               </TableBody>
             </Table>

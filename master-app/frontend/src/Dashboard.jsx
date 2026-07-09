@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Grid, Card, CardContent, Typography, Button, Paper,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, LinearProgress, useTheme, IconButton, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField
+  Chip, LinearProgress, CircularProgress, useTheme, IconButton, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField
 } from '@mui/material';
 import {
   Dns as ServerIcon,
@@ -35,6 +35,7 @@ function formatUptime(seconds) {
 export default function Dashboard() {
   const [agents, setAgents] = useState([]);
   const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ online: 0, jobsRunning: 0, totalSuccess: 0, totalFailed: 0, downtimeCount: 0 });
   const navigate = useNavigate();
   const theme = useTheme();
@@ -142,6 +143,7 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
+      setLoading(true);
       const agentsRes = await apiFetch(`${API_URL}/agents`);
       if (!agentsRes.ok) return;
       const agentsData = await agentsRes.json();
@@ -175,6 +177,8 @@ export default function Dashboard() {
       });
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -314,73 +318,86 @@ export default function Dashboard() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {agents.map(agent => {
-                  const agentHistory = history.filter(h => h.agent_hostname === agent.hostname);
-                  const lastBackup = agentHistory[0];
-                  return (
-                    <TableRow
-                      key={agent.id}
-                      hover
-                      onClick={() => navigate(`/agents/${agent.id}`)}
-                      sx={{ 
-                        cursor: 'pointer',
-                        '&:hover': {
-                          bgcolor: theme.palette.mode === 'dark' ? 'rgba(102, 252, 241, 0.04) !important' : 'rgba(0, 0, 0, 0.02) !important'
-                        }
-                      }}
-                    >
-                      <TableCell sx={{ py: 2 }} onClick={(e) => e.stopPropagation()}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography 
-                            variant="body2" 
-                            sx={{ fontWeight: 600, color: 'primary.main', cursor: 'pointer', '&:hover': { decoration: 'underline' } }}
-                            onClick={() => navigate(`/agents/${agent.id}`)}
-                          >
-                            {agent.name || agent.hostname || 'Enrolled Server'}
-                          </Typography>
-                          <IconButton 
-                            size="small" 
-                            onClick={() => {
-                              setRenameTargetId(agent.id);
-                              setNewName(agent.name || '');
-                              setRenameOpen(true);
-                            }}
-                            sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
-                          >
-                            <EditIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                        </Box>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-                          ({agent.id})
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{getStatusChip(agent.status)}</TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        {renderMiniTimeline(agent.status_history || [], agent.status)}
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <ClockIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                          <Typography variant="body2">{formatUptime(agent.uptime)}</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        {lastBackup ? getStatusChip(lastBackup.status) : (
-                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>No backups yet</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ color: 'text.secondary' }}>
-                        {agent.last_seen ? formatDistanceToNow(new Date(agent.last_seen + 'Z'), { addSuffix: true }) : 'Never'}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {agents.length === 0 && (
+                {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                      No agents connected yet.
+                    <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
+                      <CircularProgress size={30} />
+                      <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+                        Loading server agents...
+                      </Typography>
                     </TableCell>
                   </TableRow>
+                ) : (
+                  <>
+                    {agents.map(agent => {
+                      const agentHistory = history.filter(h => h.agent_hostname === agent.hostname);
+                      const lastBackup = agentHistory[0];
+                      return (
+                        <TableRow
+                          key={agent.id}
+                          hover
+                          onClick={() => navigate(`/agents/${agent.id}`)}
+                          sx={{ 
+                            cursor: 'pointer',
+                            '&:hover': {
+                              bgcolor: theme.palette.mode === 'dark' ? 'rgba(102, 252, 241, 0.04) !important' : 'rgba(0, 0, 0, 0.02) !important'
+                            }
+                          }}
+                        >
+                          <TableCell sx={{ py: 2 }} onClick={(e) => e.stopPropagation()}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography 
+                                variant="body2" 
+                                sx={{ fontWeight: 600, color: 'primary.main', cursor: 'pointer', '&:hover': { decoration: 'underline' } }}
+                                onClick={() => navigate(`/agents/${agent.id}`)}
+                              >
+                                {agent.name || agent.hostname || 'Enrolled Server'}
+                              </Typography>
+                              <IconButton 
+                                size="small" 
+                                onClick={() => {
+                                  setRenameTargetId(agent.id);
+                                  setNewName(agent.name || '');
+                                  setRenameOpen(true);
+                                }}
+                                sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                              >
+                                <EditIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Box>
+                            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                              ({agent.id})
+                            </Typography>
+                          </TableCell>
+                          <TableCell>{getStatusChip(agent.status)}</TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            {renderMiniTimeline(agent.status_history || [], agent.status)}
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <ClockIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                              <Typography variant="body2">{formatUptime(agent.uptime)}</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            {lastBackup ? getStatusChip(lastBackup.status) : (
+                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>No backups yet</Typography>
+                            )}
+                          </TableCell>
+                          <TableCell sx={{ color: 'text.secondary' }}>
+                            {agent.last_seen ? formatDistanceToNow(new Date(agent.last_seen + 'Z'), { addSuffix: true }) : 'Never'}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {agents.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                          No agents connected yet.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </>
                 )}
               </TableBody>
             </Table>
@@ -407,50 +424,63 @@ export default function Dashboard() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {history.slice(0, 10).map(item => (
-                  <TableRow key={item.id}>
-                    <TableCell sx={{ py: 2, fontWeight: 600 }}>{item.job_name}</TableCell>
-                    <TableCell 
-                      sx={{ color: 'primary.main', cursor: 'pointer', fontWeight: 500 }}
-                      onClick={() => {
-                        const agent = agents.find(a => a.hostname === item.agent_hostname);
-                        if (agent) navigate(`/agents/${agent.id}`);
-                      }}
-                    >
-                      {item.agent_hostname}
-                    </TableCell>
-                    <TableCell>{getStatusChip(item.status)}</TableCell>
-                    <TableCell>
-                      {item.status === 'running' ? (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 120 }}>
-                          <LinearProgress 
-                            variant="determinate" 
-                            value={item.progress} 
-                            sx={{ flexGrow: 1, height: 6, borderRadius: 3 }}
-                          />
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                            {item.progress}%
-                          </Typography>
-                        </Box>
-                      ) : item.status === 'success' ? (
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: 'success.main' }}>100%</Typography>
-                      ) : item.status === 'failed' ? (
-                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>—</Typography>
-                      ) : (
-                        <Typography variant="body2">{item.progress}%</Typography>
-                      )}
-                    </TableCell>
-                    <TableCell sx={{ color: 'text.secondary' }}>
-                      {formatDistanceToNow(new Date(item.start_time + 'Z'), { addSuffix: true })}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {history.length === 0 && (
+                {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                      No backup history yet.
+                    <TableCell colSpan={5} align="center" sx={{ py: 6 }}>
+                      <CircularProgress size={30} />
+                      <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+                        Loading backup activity...
+                      </Typography>
                     </TableCell>
                   </TableRow>
+                ) : (
+                  <>
+                    {history.slice(0, 10).map(item => (
+                      <TableRow key={item.id}>
+                        <TableCell sx={{ py: 2, fontWeight: 600 }}>{item.job_name}</TableCell>
+                        <TableCell 
+                          sx={{ color: 'primary.main', cursor: 'pointer', fontWeight: 500 }}
+                          onClick={() => {
+                            const agent = agents.find(a => a.hostname === item.agent_hostname);
+                            if (agent) navigate(`/agents/${agent.id}`);
+                          }}
+                        >
+                          {item.agent_hostname}
+                        </TableCell>
+                        <TableCell>{getStatusChip(item.status)}</TableCell>
+                        <TableCell>
+                          {item.status === 'running' ? (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 120 }}>
+                              <LinearProgress 
+                                variant="determinate" 
+                                value={item.progress} 
+                                sx={{ flexGrow: 1, height: 6, borderRadius: 3 }}
+                              />
+                              <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                                {item.progress}%
+                              </Typography>
+                            </Box>
+                          ) : item.status === 'success' ? (
+                            <Typography variant="body2" sx={{ fontWeight: 600, color: 'success.main' }}>100%</Typography>
+                          ) : item.status === 'failed' ? (
+                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>—</Typography>
+                          ) : (
+                            <Typography variant="body2">{item.progress}%</Typography>
+                          )}
+                        </TableCell>
+                        <TableCell sx={{ color: 'text.secondary' }}>
+                          {formatDistanceToNow(new Date(item.start_time + 'Z'), { addSuffix: true })}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {history.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                          No backup history yet.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </>
                 )}
               </TableBody>
             </Table>
