@@ -54,6 +54,13 @@ export default function Agents() {
     weekly_day: '1',
     monthly_day: '1'
   });
+  const [dbConfig, setDbConfig] = useState({
+    host: 'localhost',
+    port: '',
+    user: 'root',
+    password: '',
+    database: ''
+  });
 
   const curlCommand = agentToken ? `export AGENT_ID=${agentId}\nexport AGENT_TOKEN=${agentToken}\ncurl -fsSL ${window.location.protocol}//${window.location.host}/api/install.sh | bash` : '';
 
@@ -168,9 +175,19 @@ export default function Agents() {
   const handleJobSubmit = async (e) => {
     e.preventDefault();
     try {
-      const parsedSources = JSON.parse(jobForm.source_paths);
+      const isDb = (jobForm.backup_type === 'mysql' || jobForm.backup_type === 'postgres');
+      let parsedSources;
+      if (isDb) {
+        if (!dbConfig.database) {
+          throw new Error('Database name is required for database backups');
+        }
+        parsedSources = dbConfig;
+      } else {
+        parsedSources = JSON.parse(jobForm.source_paths);
+      }
+
       let parsedExcludes = [];
-      if (jobForm.exclude_paths) {
+      if (!isDb && jobForm.exclude_paths) {
         try {
           parsedExcludes = JSON.parse(jobForm.exclude_paths);
         } catch(err) {
@@ -444,34 +461,88 @@ export default function Agents() {
                       value={jobForm.backup_type}
                       onChange={e => setJobForm({...jobForm, backup_type: e.target.value})}
                     >
-                      <MenuItem value="full">Full Archive</MenuItem>
-                      <MenuItem value="incremental">Incremental (tar --listed-incremental)</MenuItem>
+                      <MenuItem value="full">Full Archive (Files/Folders)</MenuItem>
+                      <MenuItem value="incremental">Incremental (Files/Folders)</MenuItem>
+                      <MenuItem value="mysql">MySQL Database Dump</MenuItem>
+                      <MenuItem value="postgres">PostgreSQL Database Dump</MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>
 
-                <Grid item xs={12} sm={6}>
-                  <TextField 
-                    label="Source Paths (JSON Array)" 
-                    fullWidth
-                    value={jobForm.source_paths} 
-                    onChange={e => setJobForm({...jobForm, source_paths: e.target.value})} 
-                    required 
-                    helperText="e.g. ['/'] for full server, or ['/var/www/html']"
-                    inputProps={{ style: { fontFamily: 'monospace' } }}
-                  />
-                </Grid>
+                { (jobForm.backup_type === 'mysql' || jobForm.backup_type === 'postgres') ? (
+                  <>
+                    <Grid item xs={12} sm={4}>
+                      <TextField
+                        label="DB Host"
+                        fullWidth
+                        value={dbConfig.host}
+                        onChange={e => setDbConfig({...dbConfig, host: e.target.value})}
+                        required
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={2}>
+                      <TextField
+                        label="DB Port"
+                        placeholder={jobForm.backup_type === 'mysql' ? '3306' : '5432'}
+                        fullWidth
+                        value={dbConfig.port}
+                        onChange={e => setDbConfig({...dbConfig, port: e.target.value})}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                      <TextField
+                        label="DB Username"
+                        fullWidth
+                        value={dbConfig.user}
+                        onChange={e => setDbConfig({...dbConfig, user: e.target.value})}
+                        required
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                      <TextField
+                        label="DB Password"
+                        type="password"
+                        fullWidth
+                        value={dbConfig.password}
+                        onChange={e => setDbConfig({...dbConfig, password: e.target.value})}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        label="Database Name"
+                        fullWidth
+                        value={dbConfig.database}
+                        onChange={e => setDbConfig({...dbConfig, database: e.target.value})}
+                        required
+                      />
+                    </Grid>
+                  </>
+                ) : (
+                  <>
+                    <Grid item xs={12} sm={6}>
+                      <TextField 
+                        label="Source Paths (JSON Array)" 
+                        fullWidth
+                        value={jobForm.source_paths} 
+                        onChange={e => setJobForm({...jobForm, source_paths: e.target.value})} 
+                        required 
+                        helperText="e.g. ['/'] for full server, or ['/var/www/html']"
+                        inputProps={{ style: { fontFamily: 'monospace' } }}
+                      />
+                    </Grid>
 
-                <Grid item xs={12} sm={6}>
-                  <TextField 
-                    label="Exclude Paths (JSON Array)" 
-                    fullWidth
-                    value={jobForm.exclude_paths} 
-                    onChange={e => setJobForm({...jobForm, exclude_paths: e.target.value})} 
-                    helperText="e.g. ['/proc', '/sys', '/dev', '/run', '/mnt', '/tmp']"
-                    inputProps={{ style: { fontFamily: 'monospace' } }}
-                  />
-                </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField 
+                        label="Exclude Paths (JSON Array)" 
+                        fullWidth
+                        value={jobForm.exclude_paths} 
+                        onChange={e => setJobForm({...jobForm, exclude_paths: e.target.value})} 
+                        helperText="e.g. ['/proc', '/sys', '/dev', '/run', '/mnt', '/tmp']"
+                        inputProps={{ style: { fontFamily: 'monospace' } }}
+                      />
+                    </Grid>
+                  </>
+                )}
 
                 <Grid item xs={12} sm={4}>
                   <FormControl fullWidth>

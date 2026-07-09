@@ -13,14 +13,103 @@ async function performBackup(job, onProgress) {
   return new Promise((resolve, reject) => {
     try {
       const { name, backup_type, dest_type, dest_config } = job;
-      const sourcePaths = JSON.parse(job.source_paths);
       
       const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
-      const archiveName = `${name}-${backup_type}-${dateStr}.tar.gz`;
+      const isDb = (backup_type === 'mysql' || backup_type === 'postgres');
+      const ext = isDb ? 'sql.gz' : 'tar.gz';
+      const archiveName = `${name}-${backup_type}-${dateStr}.${ext}`;
       
       const config = dest_config ? JSON.parse(dest_config) : {};
 
-      // Prepare tar arguments
+      if (isDb) {
+        const dbConfig = typeof job.source_paths === 'string' ? JSON.parse(job.source_paths) : job.source_paths;
+        const host = dbConfig.host || 'localhost';
+        const port = dbConfig.port || (backup_type === 'mysql' ? '3306' : '5432');
+        const user = dbConfig.user || '';
+        const password = dbConfig.password || '';
+        const database = dbConfig.database || '';
+
+        if (backup_type === 'mysql') {
+          const args = ['-h', host, '-P', port, '-u', user];
+          if (password) args.push(`-p${password}`);
+          args.push(database);
+          
+          onProgress({ logs: `Starting MySQL dump for database: ${database}...`, percentage: 10 });
+          
+          const mysqldump = spawn('mysqldump', args);
+          const gzip = spawn('gzip', ['-c']);
+          
+          mysqldump.stdout.pipe(gzip.stdin);
+          
+          mysqldump.stderr.on('data', (data) => {
+            const msg = data.toString().trim();
+            if (msg) onProgress({ logs: `MYSQLDUMP: ${msg}`, percentage: null });
+          });
+          
+          gzip.stderr.on('data', (data) => {
+            const msg = data.toString().trim();
+            if (msg) onProgress({ logs: `GZIP: ${msg}`, percentage: null });
+          });
+
+          streamToDestination(gzip.stdout, dest_type, config, archiveName, onProgress)
+            .then(() => resolve({ archiveName }))
+            .catch(reject);
+
+          mysqldump.on('exit', (code) => {
+            if (code !== 0) {
+              reject(new Error(`mysqldump exited with code ${code}`));
+            }
+          });
+          
+          gzip.on('exit', (code) => {
+            if (code !== 0) {
+              reject(new Error(`gzip exited with code ${code}`));
+            }
+          });
+          return;
+        } else if (backup_type === 'postgres') {
+          const args = ['-h', host, '-p', port, '-U', user, '-F', 'p', database];
+          onProgress({ logs: `Starting PostgreSQL dump for database: ${database}...`, percentage: 10 });
+          
+          const env = { ...process.env };
+          if (password) env.PGPASSWORD = password;
+          
+          const pgdump = spawn('pg_dump', args, { env });
+          const gzip = spawn('gzip', ['-c']);
+          
+          pgdump.stdout.pipe(gzip.stdin);
+          
+          pgdump.stderr.on('data', (data) => {
+            const msg = data.toString().trim();
+            if (msg) onProgress({ logs: `PGDUMP: ${msg}`, percentage: null });
+          });
+          
+          gzip.stderr.on('data', (data) => {
+            const msg = data.toString().trim();
+            if (msg) onProgress({ logs: `GZIP: ${msg}`, percentage: null });
+          });
+
+          streamToDestination(gzip.stdout, dest_type, config, archiveName, onProgress)
+            .then(() => resolve({ archiveName }))
+            .catch(reject);
+
+          pgdump.on('exit', (code) => {
+            if (code !== 0) {
+              reject(new Error(`pg_dump exited with code ${code}`));
+            }
+          });
+          
+          gzip.on('exit', (code) => {
+            if (code !== 0) {
+              reject(new Error(`gzip exited with code ${code}`));
+            }
+          });
+          return;
+        }
+      }
+
+      // Existing non-DB files/folders backup
+      const sourcePaths = JSON.parse(job.source_paths);
       let tarArgs = ['-czf', '-']; // output to stdout
       
       if (backup_type === 'incremental') {
@@ -55,7 +144,6 @@ async function performBackup(job, onProgress) {
         throw new Error('source_paths must contain at least one valid path string');
       }
 
-      // Add -- to signify end of options to tar, preventing option injection
       tarArgs.push('--');
       tarArgs = tarArgs.concat(validPaths);
       
@@ -72,7 +160,7 @@ async function performBackup(job, onProgress) {
         .catch(reject);
 
       tarProcess.on('exit', (code) => {
-        if (code !== 0 && code !== 1) { // tar exits 1 sometimes for harmless warnings
+        if (code !== 0 && code !== 1) { 
           reject(new Error(`Tar ended with code ${code}`));
         }
       });

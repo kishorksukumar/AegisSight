@@ -108,6 +108,14 @@ export default function AgentDetails() {
     monthly_day: '1'
   });
 
+  const [dbConfig, setDbConfig] = useState({
+    host: 'localhost',
+    port: '',
+    user: 'root',
+    password: '',
+    database: ''
+  });
+
   const [restoreModal, setRestoreModal] = useState(null);
   const [restoreForm, setRestoreForm] = useState({ target_paths: '', restore_dir: '' });
   const [activeRestores, setActiveRestores] = useState({});
@@ -220,9 +228,19 @@ export default function AgentDetails() {
   const handleJobSubmit = async (e) => {
     e.preventDefault();
     try {
-      const parsedSources = JSON.parse(jobForm.source_paths);
+      const isDb = (jobForm.backup_type === 'mysql' || jobForm.backup_type === 'postgres');
+      let parsedSources;
+      if (isDb) {
+        if (!dbConfig.database) {
+          throw new Error('Database name is required for database backups');
+        }
+        parsedSources = dbConfig;
+      } else {
+        parsedSources = JSON.parse(jobForm.source_paths);
+      }
+
       let parsedExcludes = [];
-      if (jobForm.exclude_paths) {
+      if (!isDb && jobForm.exclude_paths) {
         try {
           parsedExcludes = JSON.parse(jobForm.exclude_paths);
         } catch(err) {
@@ -726,6 +744,7 @@ export default function AgentDetails() {
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Name</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Type</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Schedule</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Details / Targets</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Status</TableCell>
                 </TableRow>
               </TableHead>
@@ -733,14 +752,35 @@ export default function AgentDetails() {
                 {jobs.map(job => (
                   <TableRow key={job.id}>
                     <TableCell sx={{ fontWeight: 600 }}>{job.name}</TableCell>
-                    <TableCell sx={{ textTransform: 'capitalize' }}>{job.backup_type || 'full'}</TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={job.backup_type ? job.backup_type.toUpperCase() : 'FULL'} 
+                        size="small" 
+                        color={(job.backup_type === 'mysql' || job.backup_type === 'postgres') ? 'secondary' : 'default'}
+                        sx={{ fontWeight: 600, borderRadius: '4px' }}
+                      />
+                    </TableCell>
                     <TableCell sx={{ fontFamily: 'monospace', color: 'primary.main' }}>{job.cron_schedule}</TableCell>
+                    <TableCell sx={{ fontSize: 13, color: 'text.secondary' }}>
+                      { (job.backup_type === 'mysql' || job.backup_type === 'postgres') ? (
+                        (() => {
+                          try {
+                            const conf = JSON.parse(job.source_paths);
+                            return `Database: "${conf.database}" @ ${conf.host}`;
+                          } catch(e) {
+                            return 'Database Config';
+                          }
+                        })()
+                      ) : (
+                        `Sources: ${job.source_paths} | Excludes: ${job.exclude_paths || '[]'}`
+                      )}
+                    </TableCell>
                     <TableCell>{getStatusChip(job.is_active ? 'active' : 'paused')}</TableCell>
                   </TableRow>
                 ))}
                 {jobs.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                       No jobs scheduled for this agent.
                     </TableCell>
                   </TableRow>
@@ -898,29 +938,73 @@ export default function AgentDetails() {
                   onChange={e => setJobForm({ ...jobForm, backup_type: e.target.value })}
                   required
                 >
-                  <MenuItem value="full">Full Archive (tar.gz)</MenuItem>
-                  <MenuItem value="incremental">Incremental Backup</MenuItem>
+                  <MenuItem value="full">Full Archive (Files/Folders)</MenuItem>
+                  <MenuItem value="incremental">Incremental (Files/Folders)</MenuItem>
+                  <MenuItem value="mysql">MySQL Database Dump</MenuItem>
+                  <MenuItem value="postgres">PostgreSQL Database Dump</MenuItem>
                 </Select>
               </FormControl>
 
-              <TextField
-                label="Source Paths (JSON Array)"
-                value={jobForm.source_paths}
-                onChange={e => setJobForm({ ...jobForm, source_paths: e.target.value })}
-                helperText="e.g. ['/'] for full server, or ['/var/www/html']"
-                fullWidth
-                required
-                inputProps={{ style: { fontFamily: 'monospace' } }}
-              />
+              { (jobForm.backup_type === 'mysql' || jobForm.backup_type === 'postgres') ? (
+                <>
+                  <TextField
+                    label="DB Host"
+                    fullWidth
+                    value={dbConfig.host}
+                    onChange={e => setDbConfig({...dbConfig, host: e.target.value})}
+                    required
+                  />
+                  <TextField
+                    label="DB Port"
+                    placeholder={jobForm.backup_type === 'mysql' ? '3306' : '5432'}
+                    fullWidth
+                    value={dbConfig.port}
+                    onChange={e => setDbConfig({...dbConfig, port: e.target.value})}
+                  />
+                  <TextField
+                    label="DB Username"
+                    fullWidth
+                    value={dbConfig.user}
+                    onChange={e => setDbConfig({...dbConfig, user: e.target.value})}
+                    required
+                  />
+                  <TextField
+                    label="DB Password"
+                    type="password"
+                    fullWidth
+                    value={dbConfig.password}
+                    onChange={e => setDbConfig({...dbConfig, password: e.target.value})}
+                  />
+                  <TextField
+                    label="Database Name"
+                    fullWidth
+                    value={dbConfig.database}
+                    onChange={e => setDbConfig({...dbConfig, database: e.target.value})}
+                    required
+                  />
+                </>
+              ) : (
+                <>
+                  <TextField 
+                    label="Source Paths (JSON Array)" 
+                    fullWidth
+                    value={jobForm.source_paths} 
+                    onChange={e => setJobForm({...jobForm, source_paths: e.target.value})} 
+                    required 
+                    helperText="e.g. ['/'] for full server, or ['/var/www/html']"
+                    inputProps={{ style: { fontFamily: 'monospace' } }}
+                  />
 
-              <TextField
-                label="Exclude Paths (JSON Array)"
-                value={jobForm.exclude_paths}
-                onChange={e => setJobForm({ ...jobForm, exclude_paths: e.target.value })}
-                helperText="e.g. ['/proc', '/sys', '/dev', '/run', '/mnt', '/tmp']"
-                fullWidth
-                inputProps={{ style: { fontFamily: 'monospace' } }}
-              />
+                  <TextField 
+                    label="Exclude Paths (JSON Array)" 
+                    fullWidth
+                    value={jobForm.exclude_paths} 
+                    onChange={e => setJobForm({...jobForm, exclude_paths: e.target.value})} 
+                    helperText="e.g. ['/proc', '/sys', '/dev', '/run', '/mnt', '/tmp']"
+                    inputProps={{ style: { fontFamily: 'monospace' } }}
+                  />
+                </>
+              )}
 
               <FormControl fullWidth>
                 <InputLabel id="freq-select-label">Schedule Frequency</InputLabel>
