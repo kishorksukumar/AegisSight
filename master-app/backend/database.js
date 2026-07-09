@@ -131,6 +131,15 @@ db.exec(`
   );
 `);
 
+// Create indexes for query speed optimization
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_backup_jobs_agent_id ON backup_jobs(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_backup_history_job_id ON backup_history(job_id);
+  CREATE INDEX IF NOT EXISTS idx_backup_history_start_time ON backup_history(start_time);
+  CREATE INDEX IF NOT EXISTS idx_agent_downtime_events_agent_id ON agent_downtime_events(agent_id);
+  CREATE INDEX IF NOT EXISTS idx_agents_status_last_seen ON agents(status, last_seen);
+`);
+
 // Password hashing consolidated in auth-util.js
 
 const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
