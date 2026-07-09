@@ -41,6 +41,19 @@ function App() {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
+  useEffect(() => {
+    if (isAuthenticated) {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz) {
+        fetch('/api/settings/timezone', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ timezone: tz })
+        }).catch(e => console.error('Failed to report timezone:', e));
+      }
+    }
+  }, [isAuthenticated]);
+
   const handleLogout = async () => {
     try {
       await fetch('/api/logout', { method: 'POST', credentials: 'include' });

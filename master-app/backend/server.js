@@ -357,6 +357,15 @@ app.get('/api/settings', (req, res) => {
   res.json(result);
 });
 
+app.post('/api/settings/timezone', requireAdmin, (req, res) => {
+  const { timezone } = req.body;
+  if (timezone) {
+    const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('timezone', ?)");
+    stmt.run(timezone);
+  }
+  res.json({ success: true });
+});
+
 app.post('/api/settings/domain', requireAdmin, (req, res) => {
   const { domain } = req.body;
   if (!domain || !domain.match(/^[a-zA-Z0-9.-]+$/)) return res.status(400).json({ error: 'Valid domain is required' });
@@ -803,7 +812,8 @@ app.get('/api/agents/:id/jobs', (req, res) => {
     WHERE j.agent_id = ?
   `).all(req.params.id);
   const parsedJobs = jobs.map(j => ({ ...j, dest_config: j.dest_config ? decrypt(j.dest_config) : null }));
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const tzRow = db.prepare("SELECT value FROM settings WHERE key = 'timezone'").get();
+  const tz = tzRow ? tzRow.value : 'UTC';
   res.json({ jobs: parsedJobs, timezone: tz });
 });
 
