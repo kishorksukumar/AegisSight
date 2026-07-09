@@ -326,10 +326,17 @@ app.post('/api/settings/ssl', strictLimiter, requireAdmin, async (req, res) => {
       const nginxContainer = process.env.NGINX_CONTAINER || 'aegissight-nginx';
       const nginxSslConf = path.join(__dirname, '../../nginx/nginx.conf');
       const rendered = fs.readFileSync(nginxSslConf, 'utf8').replace(/\$\{DOMAIN\}/g, domain);
-      fs.writeFileSync('/tmp/aegis-nginx-ssl.conf', rendered);
-
-      const cpResult = _spawnSync('docker', ['cp', '/tmp/aegis-nginx-ssl.conf', `${nginxContainer}:/etc/nginx/conf.d/default.conf`], { timeout: 30000 });
-      if (cpResult.status !== 0) throw new Error(cpResult.stderr?.toString() || 'docker cp failed');
+      
+      const sharedConfigPath = '/etc/nginx/conf.d/default.conf';
+      try {
+        fs.writeFileSync(sharedConfigPath, rendered);
+        res.write('[AegisSight] Wrote SSL configuration directly to shared volume.\n');
+      } catch (writeErr) {
+        fs.writeFileSync('/tmp/aegis-nginx-ssl.conf', rendered);
+        const cpResult = _spawnSync('docker', ['cp', '/tmp/aegis-nginx-ssl.conf', `${nginxContainer}:/etc/nginx/conf.d/default.conf`], { timeout: 30000 });
+        if (cpResult.status !== 0) throw new Error(cpResult.stderr?.toString() || 'docker cp failed');
+        res.write('[AegisSight] Copied SSL configuration to Nginx container.\n');
+      }
 
       const reloadResult = _spawnSync('docker', ['exec', nginxContainer, 'nginx', '-s', 'reload'], { timeout: 30000 });
       if (reloadResult.status !== 0) throw new Error(reloadResult.stderr?.toString() || 'nginx reload failed');
