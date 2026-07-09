@@ -30,6 +30,22 @@ async function performBackup(job, onProgress) {
         tarArgs.push(`--listed-incremental=${snapFile}`);
       }
 
+      let excludePaths = [];
+      if (job.exclude_paths) {
+        try {
+          excludePaths = typeof job.exclude_paths === 'string' ? JSON.parse(job.exclude_paths) : job.exclude_paths;
+        } catch (e) {}
+      }
+
+      if (Array.isArray(excludePaths)) {
+        excludePaths.forEach(ex => {
+          const trimmed = typeof ex === 'string' ? ex.trim() : '';
+          if (trimmed.length > 0) {
+            tarArgs.push(`--exclude=${trimmed}`);
+          }
+        });
+      }
+
       if (!Array.isArray(sourcePaths) || sourcePaths.length === 0) {
         throw new Error('source_paths must be a non-empty array of strings');
       }

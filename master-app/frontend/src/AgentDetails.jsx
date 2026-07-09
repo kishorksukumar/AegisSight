@@ -99,8 +99,13 @@ export default function AgentDetails() {
     name: 'Scheduled Backup',
     destination_id: '',
     source_paths: '["/var/www/html", "/etc"]',
+    exclude_paths: '["/proc", "/sys", "/dev", "/run", "/mnt", "/tmp"]',
     backup_type: 'full',
-    cron_schedule: '0 2 * * *'
+    cron_schedule: '0 2 * * *',
+    schedule_type: 'daily',
+    start_time: '02:00',
+    weekly_day: '1',
+    monthly_day: '1'
   });
 
   const [restoreModal, setRestoreModal] = useState(null);
@@ -215,15 +220,40 @@ export default function AgentDetails() {
   const handleJobSubmit = async (e) => {
     e.preventDefault();
     try {
-      JSON.parse(jobForm.source_paths);
+      const parsedSources = JSON.parse(jobForm.source_paths);
+      let parsedExcludes = [];
+      if (jobForm.exclude_paths) {
+        try {
+          parsedExcludes = JSON.parse(jobForm.exclude_paths);
+        } catch(err) {
+          throw new Error('Exclude paths must be a valid JSON array or empty like []');
+        }
+      }
+
+      let finalCron = jobForm.cron_schedule;
+      if (jobForm.schedule_type === 'daily') {
+        const [hours, minutes] = jobForm.start_time.split(':');
+        finalCron = `${parseInt(minutes)} ${parseInt(hours)} * * *`;
+      } else if (jobForm.schedule_type === 'weekly') {
+        const [hours, minutes] = jobForm.start_time.split(':');
+        finalCron = `${parseInt(minutes)} ${parseInt(hours)} * * ${jobForm.weekly_day}`;
+      } else if (jobForm.schedule_type === 'monthly') {
+        const [hours, minutes] = jobForm.start_time.split(':');
+        finalCron = `${parseInt(minutes)} ${parseInt(hours)} ${jobForm.monthly_day} * *`;
+      }
+
       const res = await apiFetch(`${API_URL}/jobs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...jobForm,
           id: `job_${Date.now()}`,
           agent_id: id,
-          source_paths: JSON.parse(jobForm.source_paths)
+          name: jobForm.name,
+          source_paths: parsedSources,
+          exclude_paths: parsedExcludes,
+          destination_id: jobForm.destination_id,
+          backup_type: jobForm.backup_type,
+          cron_schedule: finalCron
         })
       });
       if (res.ok) {
@@ -233,8 +263,13 @@ export default function AgentDetails() {
           name: 'Scheduled Backup',
           destination_id: destinations.length > 0 ? destinations[0].id : '',
           source_paths: '["/var/www/html", "/etc"]',
+          exclude_paths: '["/proc", "/sys", "/dev", "/run", "/mnt", "/tmp"]',
           backup_type: 'full',
-          cron_schedule: '0 2 * * *'
+          cron_schedule: '0 2 * * *',
+          schedule_type: 'daily',
+          start_time: '02:00',
+          weekly_day: '1',
+          monthly_day: '1'
         });
         fetchJobs();
       } else {
@@ -242,7 +277,7 @@ export default function AgentDetails() {
         alert(err.error || 'Failed to schedule job');
       }
     } catch (err) {
-      alert("Error: Source paths must be a valid JSON array like [\"/etc\", \"/var/log\"]");
+      alert(err.message || "Error: Source paths must be a valid JSON array like [\"/etc\", \"/var/log\"]");
     }
   };
 
@@ -872,21 +907,95 @@ export default function AgentDetails() {
                 label="Source Paths (JSON Array)"
                 value={jobForm.source_paths}
                 onChange={e => setJobForm({ ...jobForm, source_paths: e.target.value })}
-                helperText="Enter a JSON array of directories, e.g. ['/var/www/html', '/etc/nginx']"
+                helperText="e.g. ['/'] for full server, or ['/var/www/html']"
                 fullWidth
                 required
                 inputProps={{ style: { fontFamily: 'monospace' } }}
               />
 
               <TextField
-                label="Cron Schedule"
-                value={jobForm.cron_schedule}
-                onChange={e => setJobForm({ ...jobForm, cron_schedule: e.target.value })}
-                placeholder="e.g. 0 2 * * *"
-                helperText="Standard cron syntax: minute hour day-of-month month day-of-week"
+                label="Exclude Paths (JSON Array)"
+                value={jobForm.exclude_paths}
+                onChange={e => setJobForm({ ...jobForm, exclude_paths: e.target.value })}
+                helperText="e.g. ['/proc', '/sys', '/dev', '/run', '/mnt', '/tmp']"
                 fullWidth
-                required
+                inputProps={{ style: { fontFamily: 'monospace' } }}
               />
+
+              <FormControl fullWidth>
+                <InputLabel id="freq-select-label">Schedule Frequency</InputLabel>
+                <Select
+                  labelId="freq-select-label"
+                  label="Schedule Frequency"
+                  value={jobForm.schedule_type}
+                  onChange={e => setJobForm({ ...jobForm, schedule_type: e.target.value })}
+                >
+                  <MenuItem value="daily">Daily</MenuItem>
+                  <MenuItem value="weekly">Weekly</MenuItem>
+                  <MenuItem value="monthly">Monthly</MenuItem>
+                  <MenuItem value="custom">Custom (Cron)</MenuItem>
+                </Select>
+              </FormControl>
+
+              {jobForm.schedule_type !== 'custom' && (
+                <TextField
+                  label="Start Time"
+                  type="time"
+                  fullWidth
+                  value={jobForm.start_time}
+                  onChange={e => setJobForm({ ...jobForm, start_time: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ step: 300 }}
+                />
+              )}
+
+              {jobForm.schedule_type === 'weekly' && (
+                <FormControl fullWidth>
+                  <InputLabel id="weekday-select-label">Day of Week</InputLabel>
+                  <Select
+                    labelId="weekday-select-label"
+                    label="Day of Week"
+                    value={jobForm.weekly_day}
+                    onChange={e => setJobForm({ ...jobForm, weekly_day: e.target.value })}
+                  >
+                    <MenuItem value="1">Monday</MenuItem>
+                    <MenuItem value="2">Tuesday</MenuItem>
+                    <MenuItem value="3">Wednesday</MenuItem>
+                    <MenuItem value="4">Thursday</MenuItem>
+                    <MenuItem value="5">Friday</MenuItem>
+                    <MenuItem value="6">Saturday</MenuItem>
+                    <MenuItem value="0">Sunday</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
+
+              {jobForm.schedule_type === 'monthly' && (
+                <FormControl fullWidth>
+                  <InputLabel id="monthday-select-label">Day of Month</InputLabel>
+                  <Select
+                    labelId="monthday-select-label"
+                    label="Day of Month"
+                    value={jobForm.monthly_day}
+                    onChange={e => setJobForm({ ...jobForm, monthly_day: e.target.value })}
+                  >
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map(day => (
+                      <MenuItem key={day} value={String(day)}>{day}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+
+              {jobForm.schedule_type === 'custom' && (
+                <TextField
+                  label="Cron Schedule"
+                  value={jobForm.cron_schedule}
+                  onChange={e => setJobForm({ ...jobForm, cron_schedule: e.target.value })}
+                  placeholder="e.g. 0 2 * * *"
+                  helperText="Standard cron syntax: minute hour day-of-month month day-of-week"
+                  fullWidth
+                  required
+                />
+              )}
             </Box>
           )}
         </DialogContent>

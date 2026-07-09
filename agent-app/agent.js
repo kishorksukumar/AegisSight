@@ -25,6 +25,7 @@ const socket = io(AEGISSIGHT_URL, {
 let currentJobs = [];
 let cronTasks = {};
 let telemetryInterval;
+const runningJobs = new Set();
 
 socket.on("connect", () => {
   console.log("Connected to AegisSight:", AEGISSIGHT_URL);
@@ -94,6 +95,12 @@ function scheduleJobs() {
 }
 
 async function executeJob(job) {
+  if (runningJobs.has(job.id)) {
+    console.warn(`WARNING: Job '${job.name}' (${job.id}) is already running. Skipping execution to prevent overlapping.`);
+    return;
+  }
+
+  runningJobs.add(job.id);
   const historyId = `hist-${Date.now()}`;
   
   // Start job
@@ -135,6 +142,8 @@ async function executeJob(job) {
       progress: 0,
       logs: `Error: ${error.message}`
     });
+  } finally {
+    runningJobs.delete(job.id);
   }
 }
 

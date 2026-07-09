@@ -104,6 +104,7 @@ for (const [key, value] of Object.entries(settingsDefaults)) {
 
 try { db.exec(`ALTER TABLE backup_jobs ADD COLUMN destination_id TEXT REFERENCES destinations(id);`); } catch(e) {}
 try { db.exec(`ALTER TABLE backup_jobs ADD COLUMN backup_type TEXT DEFAULT 'full';`); } catch(e) {}
+try { db.exec(`ALTER TABLE backup_jobs ADD COLUMN exclude_paths TEXT;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN cpu_load TEXT;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN ram_usage TEXT;`); } catch(e) {}
 try { db.exec(`ALTER TABLE agents ADD COLUMN uptime INTEGER;`); } catch(e) {}
