@@ -11,11 +11,13 @@ const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const cookie = require('cookie');
 const morgan = require('morgan');
+const compression = require('compression');
 const { sendNotification, checkTelemetryAlerts, testSmtpSettings, testTelegramSettings } = require('./notification-util');
 
 
 const app = express();
 app.set('trust proxy', 1);
+app.use(compression());
 app.use(helmet());
 app.use(cookieParser());
 app.use(morgan('combined'));
@@ -188,6 +190,114 @@ function verifyToken(req, res, next) {
 }
 
 app.use(verifyToken);
+
+app.get('/api/dashboard/summary', (req, res) => {
+  try {
+    const agents = db.prepare('SELECT id, name, hostname, ip_address, platform, status, last_seen, uptime FROM agents').all();
+    const withHistory = agents.map(agent => {
+      try {
+        const history = db.prepare(`
+          SELECT hour_bucket, status FROM agent_status_history 
+          WHERE agent_id = ? 
+          ORDER BY hour_bucket DESC LIMIT 24
+        `).all(agent.id);
+        return { ...agent, status_history: history.reverse() };
+      } catch(e) {
+        return { ...agent, status_history: [] };
+      }
+    });
+
+    const history = db.prepare(`
+      SELECT h.*, j.name as job_name, a.hostname as agent_hostname 
+      FROM backup_history h
+      JOIN backup_jobs j ON h.job_id = j.id
+      JOIN agents a ON j.agent_id = a.id
+      ORDER BY h.start_time DESC LIMIT 50
+    `).all();
+
+    const downtime = db.prepare(`
+      SELECT e.*, a.name as agent_name, a.hostname as agent_hostname
+      FROM agent_downtime_events e
+      JOIN agents a ON e.agent_id = a.id
+      ORDER BY e.start_time DESC LIMIT 20
+    `).all();
+
+    const destinationsRaw = db.prepare('SELECT * FROM destinations').all();
+    const destinations = destinationsRaw.map(d => {
+      const rawConfig = decrypt(d.config);
+      let parsedConfig = {};
+      if (rawConfig) {
+        try {
+          parsedConfig = JSON.parse(rawConfig);
+          if (parsedConfig.secretAccessKey) parsedConfig.secretAccessKey = '********';
+          if (parsedConfig.password) parsedConfig.password = '********';
+        } catch (err) {}
+      }
+      return { ...d, config: parsedConfig };
+    });
+
+    res.json({
+      agents: withHistory,
+      history,
+      downtime,
+      destinations
+    });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/agents/:id/summary', (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const agent = db.prepare('SELECT id, name, hostname, ip_address, platform, status, last_seen, uptime FROM agents WHERE id = ?').get(id);
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+    let status_history = [];
+    try {
+      const sh = db.prepare(`
+        SELECT hour_bucket, status FROM agent_status_history 
+        WHERE agent_id = ? 
+        ORDER BY hour_bucket DESC LIMIT 24
+      `).all(id);
+      status_history = sh.reverse();
+    } catch(e) {}
+
+    const history = db.prepare(`
+      SELECT h.*, j.name as job_name
+      FROM backup_history h
+      JOIN backup_jobs j ON h.job_id = j.id
+      WHERE j.agent_id = ?
+      ORDER BY h.start_time DESC LIMIT 50
+    `).all(id);
+
+    const jobs = db.prepare('SELECT * FROM backup_jobs WHERE agent_id = ?').all(id);
+
+    const destinationsRaw = db.prepare('SELECT * FROM destinations').all();
+    const destinations = destinationsRaw.map(d => {
+      const rawConfig = decrypt(d.config);
+      let parsedConfig = {};
+      if (rawConfig) {
+        try {
+          parsedConfig = JSON.parse(rawConfig);
+          if (parsedConfig.secretAccessKey) parsedConfig.secretAccessKey = '********';
+          if (parsedConfig.password) parsedConfig.password = '********';
+        } catch (err) {}
+      }
+      return { ...d, config: parsedConfig };
+    });
+
+    res.json({
+      agent: { ...agent, status_history },
+      history,
+      jobs,
+      destinations
+    });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/users', (req, res) => {
   const users = db.prepare('SELECT id, username, created_at FROM users').all();

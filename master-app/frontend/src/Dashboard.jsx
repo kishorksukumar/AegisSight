@@ -144,37 +144,23 @@ export default function Dashboard() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const agentsRes = await apiFetch(`${API_URL}/agents`);
-      if (!agentsRes.ok) return;
-      const agentsData = await agentsRes.json();
-      if (!Array.isArray(agentsData)) return;
-      setAgents(agentsData);
-
-      const histRes = await apiFetch(`${API_URL}/history`);
-      if (!histRes.ok) return;
-      const histData = await histRes.json();
-      if (!Array.isArray(histData)) return;
-      setHistory(histData);
-
-      let downCount = 0;
-      try {
-        const downRes = await apiFetch(`${API_URL}/downtime`);
-        if (downRes.ok) {
-          const downData = await downRes.json();
-          if (Array.isArray(downData)) {
-            setDowntimeEvents(downData);
-            downCount = downData.length;
-          }
+      const res = await apiFetch(`${API_URL}/dashboard/summary`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.agents)) setAgents(data.agents);
+        if (data && Array.isArray(data.history)) setHistory(data.history);
+        if (data && Array.isArray(data.downtime)) setDowntimeEvents(data.downtime);
+        
+        if (data && Array.isArray(data.agents) && Array.isArray(data.history)) {
+          setStats({
+            online: data.agents.filter(a => a.status === 'online').length,
+            jobsRunning: data.history.filter(h => h.status === 'running').length,
+            totalSuccess: data.history.filter(h => h.status === 'success').length,
+            totalFailed: data.history.filter(h => h.status === 'failed').length,
+            downtimeCount: Array.isArray(data.downtime) ? data.downtime.length : 0
+          });
         }
-      } catch (e) {}
-
-      setStats({
-        online: agentsData.filter(a => a.status === 'online').length,
-        jobsRunning: histData.filter(h => h.status === 'running').length,
-        totalSuccess: histData.filter(h => h.status === 'success').length,
-        totalFailed: histData.filter(h => h.status === 'failed').length,
-        downtimeCount: downCount
-      });
+      }
     } catch (err) {
       console.error(err);
     } finally {

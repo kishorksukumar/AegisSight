@@ -136,13 +136,10 @@ export default function AgentDetails() {
     };
 
     socket.on('dashboard:agents_updated', () => {
-      throttledFetch(() => {
-        fetchAgent();
-        fetchStatusHistory();
-      });
+      throttledFetch(fetchAll);
     });
     socket.on('dashboard:history_updated', () => {
-      throttledFetch(fetchHistory);
+      throttledFetch(fetchAll);
     });
     socket.on('dashboard:restore_status', (data) => {
       setActiveRestores(prev => ({ ...prev, [data.restore_id]: data }));
@@ -156,9 +153,32 @@ export default function AgentDetails() {
   }, [id]);
 
   const fetchAll = async () => {
-    setLoading(true);
-    await Promise.all([fetchAgent(), fetchHistory(), fetchJobs(), fetchDestinations(), fetchStatusHistory()]);
-    setLoading(false);
+    try {
+      setLoading(true);
+      const res = await apiFetch(`${API_URL}/agents/${id}/summary`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.agent) {
+          setAgent(data.agent);
+          setNewName(data.agent.name || '');
+          if (Array.isArray(data.agent.status_history)) {
+            setStatusHistory(data.agent.status_history);
+          }
+        }
+        if (Array.isArray(data.history)) setHistory(data.history);
+        if (Array.isArray(data.jobs)) setJobs(data.jobs);
+        if (Array.isArray(data.destinations)) {
+          setDestinations(data.destinations);
+          if (data.destinations.length > 0) {
+            setJobForm(f => ({ ...f, destination_id: data.destinations[0].id }));
+          }
+        }
+      }
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchAgent = async () => {

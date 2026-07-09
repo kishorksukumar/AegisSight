@@ -13,6 +13,9 @@ const db = new Database(dbPath); // Removed verbose for cleaner startup logs
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 10000');
+db.pragma('synchronous = NORMAL');
+db.pragma('temp_store = MEMORY');
+db.pragma('cache_size = -64000');
 
 // Clean up expired sessions on startup
 try { db.prepare("DELETE FROM sessions WHERE created_at < datetime('now', '-24 hours')").run(); } catch(e) {}
