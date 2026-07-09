@@ -17,6 +17,8 @@ services:
       - backend_data:/app/data
       # Docker socket — needed to trigger certbot & nginx reload from Settings page
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Nginx config folder for direct writes
+      - ./nginx/conf.d:/etc/nginx/conf.d
     expose:
       - "4000"
     networks:
