@@ -21,7 +21,8 @@ import {
   History as HistoryIcon,
   SettingsBackupRestore as RestoreIcon,
   Edit as EditIcon,
-  Add as AddIcon
+  Add as AddIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 
 const API_URL = "/api";
@@ -87,6 +88,9 @@ export default function AgentDetails() {
   // Rename states
   const [renameOpen, setRenameOpen] = useState(false);
   const [newName, setNewName] = useState('');
+
+  // Delete states
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Job creation states
   const [jobOpen, setJobOpen] = useState(false);
@@ -189,6 +193,22 @@ export default function AgentDetails() {
       }
     } catch (err) {
       alert('Failed to rename agent');
+    }
+  };
+
+  const handleDeleteSubmit = async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/agents/${id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setDeleteOpen(false);
+        navigate('/');
+      } else {
+        alert('Failed to delete server agent');
+      }
+    } catch(err) {
+      alert('Delete request failed');
     }
   };
 
@@ -386,15 +406,26 @@ export default function AgentDetails() {
           </Box>
         </Box>
 
-        <Button
-          variant="contained"
-          color="primary"
-          startIcon={<AddIcon />}
-          onClick={() => setJobOpen(true)}
-          sx={{ fontWeight: 600 }}
-        >
-          Schedule Backup Job
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1.5 }}>
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteIcon />}
+            onClick={() => setDeleteOpen(true)}
+            sx={{ fontWeight: 600 }}
+          >
+            Delete Server
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={() => setJobOpen(true)}
+            sx={{ fontWeight: 600 }}
+          >
+            Schedule Backup Job
+          </Button>
+        </Box>
       </Box>
 
       {/* Server Metadata & Availability Timeline Card */}
@@ -870,6 +901,40 @@ export default function AgentDetails() {
             disabled={destinations.length === 0}
           >
             Schedule Job
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Dialog Modal */}
+      <Dialog 
+        open={deleteOpen} 
+        onClose={() => setDeleteOpen(false)}
+        PaperProps={{
+          sx: {
+            border: `1px solid ${theme => theme.palette.mode === 'dark' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(0, 0, 0, 0.08)'}`,
+            bgcolor: 'background.paper',
+            borderRadius: 3,
+            minWidth: 320
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, fontFamily: "'Outfit', sans-serif" }}>
+          Delete Server Agent
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
+            Are you sure you want to permanently delete this server agent (<strong>{id}</strong>) and all its scheduled backup jobs, history, downtime logs, and metrics?
+          </Typography>
+          <Typography variant="body2" color="error.main" sx={{ mt: 2, fontWeight: 600 }}>
+            This action is irreversible.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button onClick={() => setDeleteOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteSubmit} variant="contained" color="error">
+            Delete Permanently
           </Button>
         </DialogActions>
       </Dialog>

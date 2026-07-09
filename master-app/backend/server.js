@@ -616,6 +616,32 @@ app.post('/api/agents/:id/rename', requireAdmin, (req, res) => {
   }
 });
 
+app.delete('/api/agents/:id', requireAdmin, (req, res) => {
+  const { id } = req.params;
+  try {
+    const deleteHistory = db.prepare(`DELETE FROM backup_history WHERE job_id IN (SELECT id FROM backup_jobs WHERE agent_id = ?)`);
+    const deleteJobs = db.prepare(`DELETE FROM backup_jobs WHERE agent_id = ?`);
+    const deleteStatusHistory = db.prepare(`DELETE FROM agent_status_history WHERE agent_id = ?`);
+    const deleteDowntimeEvents = db.prepare(`DELETE FROM agent_downtime_events WHERE agent_id = ?`);
+    const deleteAgent = db.prepare(`DELETE FROM agents WHERE id = ?`);
+
+    const transaction = db.transaction(() => {
+      deleteHistory.run(id);
+      deleteJobs.run(id);
+      deleteStatusHistory.run(id);
+      deleteDowntimeEvents.run(id);
+      deleteAgent.run(id);
+    });
+
+    transaction();
+    io.emit('dashboard:agents_updated');
+    res.json({ success: true, message: 'Agent deleted successfully.' });
+  } catch (err) {
+    console.error('Error deleting agent:', err);
+    res.status(500).json({ error: 'Failed to delete agent.' });
+  }
+});
+
 app.get('/api/agents/:id/status-history', (req, res) => {
   try {
     // Return last 24 records from status history

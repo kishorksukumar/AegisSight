@@ -15,7 +15,8 @@ import {
   Schedule as ScheduleIcon,
   Dns as ServerIcon,
   Edit as EditIcon,
-  Visibility as ViewIcon
+  Visibility as ViewIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 
 const API_URL = "/api";
@@ -31,10 +32,13 @@ export default function Agents() {
   const [agents, setAgents] = useState([]);
   const [destinations, setDestinations] = useState([]);
 
-  // Rename states
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTargetId, setRenameTargetId] = useState('');
   const [newName, setNewName] = useState('');
+
+  // Delete states
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState('');
   
   const [jobForm, setJobForm] = useState({
     id: `job_${Date.now()}`,
@@ -69,6 +73,23 @@ export default function Agents() {
       }
     } catch(err) {
       showToast('Rename request failed', 'error');
+    }
+  };
+
+  const handleDeleteSubmit = async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/agents/${deleteTargetId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setDeleteOpen(false);
+        showToast('Server deleted successfully');
+        fetchData();
+      } else {
+        showToast('Failed to delete server', 'error');
+      }
+    } catch(err) {
+      showToast('Delete request failed', 'error');
     }
   };
 
@@ -288,15 +309,27 @@ export default function Agents() {
                       <TableCell sx={{ textTransform: 'capitalize', color: 'text.secondary' }}>{a.platform || '—'}</TableCell>
                       <TableCell>{getStatusChip(a.status)}</TableCell>
                       <TableCell>
-                        <Button 
-                          variant="outlined" 
-                          size="small" 
-                          startIcon={<ViewIcon />} 
-                          onClick={() => navigate(`/agents/${a.id}`)}
-                          sx={{ fontWeight: 600 }}
-                        >
-                          Details
-                        </Button>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Button 
+                            variant="outlined" 
+                            size="small" 
+                            startIcon={<ViewIcon />} 
+                            onClick={() => navigate(`/agents/${a.id}`)}
+                            sx={{ fontWeight: 600 }}
+                          >
+                            Details
+                          </Button>
+                          <IconButton
+                            color="error"
+                            size="small"
+                            onClick={() => {
+                              setDeleteTargetId(a.id);
+                              setDeleteOpen(true);
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -464,6 +497,40 @@ export default function Agents() {
           </Button>
           <Button onClick={handleRenameSubmit} variant="contained" color="primary">
             Save Name
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Dialog Modal */}
+      <Dialog 
+        open={deleteOpen} 
+        onClose={() => setDeleteOpen(false)}
+        PaperProps={{
+          sx: {
+            border: `1px solid ${theme => theme.palette.mode === 'dark' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(0, 0, 0, 0.08)'}`,
+            bgcolor: 'background.paper',
+            borderRadius: 3,
+            minWidth: 320
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, fontFamily: "'Outfit', sans-serif" }}>
+          Delete Server Agent
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
+            Are you sure you want to permanently delete this server agent (<strong>{deleteTargetId}</strong>) and all its scheduled backup jobs, history, downtime logs, and metrics?
+          </Typography>
+          <Typography variant="body2" color="error.main" sx={{ mt: 2, fontWeight: 600 }}>
+            This action is irreversible.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button onClick={() => setDeleteOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteSubmit} variant="contained" color="error">
+            Delete Permanently
           </Button>
         </DialogActions>
       </Dialog>
