@@ -703,7 +703,7 @@ app.put('/api/agents/:id/restore', strictLimiter, requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Backup history record not found or has no archive name.' });
   }
 
-  const job = db.prepare('SELECT agent_id, destination_id FROM backup_jobs WHERE id = ?').get(history.job_id);
+  const job = db.prepare('SELECT agent_id, destination_id, backup_type, source_paths FROM backup_jobs WHERE id = ?').get(history.job_id);
   if (!job || job.agent_id !== req.params.id) {
     return res.status(400).json({ error: 'Job does not belong to this agent.' });
   }
@@ -726,6 +726,8 @@ app.put('/api/agents/:id/restore', strictLimiter, requireAdmin, (req, res) => {
     restore_id,
     history_id,
     archive_name: history.archive_name,
+    backup_type: job.backup_type,
+    source_paths: job.source_paths,
     dest_type: destination.type,
     dest_config: decrypt(destination.config),
     target_paths: target_paths || [],

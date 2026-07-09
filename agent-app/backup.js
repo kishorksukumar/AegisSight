@@ -322,8 +322,66 @@ async function streamFromDestination(writableStream, type, config, filename, onP
 async function performRestore(options, onProgress) {
   return new Promise((resolve, reject) => {
     try {
-      const { archive_name, dest_type, dest_config, target_paths, restore_dir } = options;
+      const { archive_name, backup_type, source_paths, dest_type, dest_config, target_paths, restore_dir } = options;
       const config = dest_config ? JSON.parse(dest_config) : {};
+
+      const isDb = (backup_type === 'mysql' || backup_type === 'postgres');
+
+      if (isDb) {
+        const dbConfig = typeof source_paths === 'string' ? JSON.parse(source_paths) : source_paths;
+        const host = dbConfig.host || 'localhost';
+        const port = dbConfig.port || (backup_type === 'mysql' ? '3306' : '5432');
+        const user = dbConfig.user || '';
+        const password = dbConfig.password || '';
+        const database = dbConfig.database || '';
+
+        onProgress({ logs: `Connecting database client to restore backup...`, percentage: 10 });
+
+        let dbProcess;
+        if (backup_type === 'mysql') {
+          const args = ['-h', host, '-P', port, '-u', user];
+          if (password) args.push(`-p${password}`);
+          args.push(database);
+          dbProcess = spawn('mysql', args);
+        } else if (backup_type === 'postgres') {
+          const args = ['-h', host, '-p', port, '-U', user, '-d', database];
+          const env = { ...process.env };
+          if (password) env.PGPASSWORD = password;
+          dbProcess = spawn('psql', args, { env });
+        }
+
+        const gunzip = spawn('gunzip', ['-c']);
+        gunzip.stdout.pipe(dbProcess.stdin);
+
+        dbProcess.stderr.on('data', (data) => {
+          const msg = data.toString().trim();
+          if (msg) onProgress({ logs: `DB_RESTORE: ${msg}`, percentage: null });
+        });
+
+        gunzip.stderr.on('data', (data) => {
+          const msg = data.toString().trim();
+          if (msg) onProgress({ logs: `GUNZIP: ${msg}`, percentage: null });
+        });
+
+        streamFromDestination(gunzip.stdin, dest_type, config, archive_name, onProgress)
+          .then(() => {
+             // download finished
+          })
+          .catch(err => {
+             gunzip.kill();
+             dbProcess.kill();
+             reject(err);
+          });
+
+        dbProcess.on('exit', (code) => {
+          if (code === 0) {
+            resolve({ success: true });
+          } else {
+            reject(new Error(`Database restore client exited with code ${code}`));
+          }
+        });
+        return;
+      }
 
       // Prepare tar arguments
       let tarArgs = ['-xzf', '-']; // read from stdin
@@ -361,7 +419,7 @@ async function performRestore(options, onProgress) {
         .catch(err => {
            tarProcess.kill();
            reject(err);
-        });
+         });
 
       tarProcess.on('exit', (code) => {
         if (code === 0 || code === 1) { 
