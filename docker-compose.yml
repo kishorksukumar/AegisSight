@@ -10,6 +10,8 @@ services:
     env_file: .env
     environment:
       - PORT=4000
+      - CERTBOT_CONTAINER=aegissight-certbot
+      - NGINX_CONTAINER=aegissight-nginx
     volumes:
       # Persist SQLite database
       - backend_data:/app/data
