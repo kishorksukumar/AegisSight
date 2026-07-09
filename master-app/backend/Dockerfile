@@ -9,6 +9,7 @@ COPY master-app/backend/package*.json ./
 RUN npm ci --omit=dev
 
 COPY master-app/backend/ ./
+COPY agent-app/ /app/agent-app/
 COPY nginx/ /nginx/
 
 # Ensure data dir exists

@@ -1004,7 +1004,9 @@ echo "Install complete! Run locally with: node /opt/aegissight-agent/agent.js"
 app.get('/api/agent-bundle.js', (req, res) => {
   const fs = require('fs');
   const path = require('path');
-  const agentPath = path.join(__dirname, '../../agent-app/agent.js');
+  const agentPath = fs.existsSync(path.join(__dirname, 'agent-app/agent.js'))
+    ? path.join(__dirname, 'agent-app/agent.js')
+    : path.join(__dirname, '../../agent-app/agent.js');
   res.setHeader('Content-Type', 'application/javascript');
   res.send(fs.readFileSync(agentPath, 'utf8'));
 });
@@ -1012,7 +1014,9 @@ app.get('/api/agent-bundle.js', (req, res) => {
 app.get('/api/backup-bundle.js', (req, res) => {
   const fs = require('fs');
   const path = require('path');
-  const backupPath = path.join(__dirname, '../../agent-app/backup.js');
+  const backupPath = fs.existsSync(path.join(__dirname, 'agent-app/backup.js'))
+    ? path.join(__dirname, 'agent-app/backup.js')
+    : path.join(__dirname, '../../agent-app/backup.js');
   res.setHeader('Content-Type', 'application/javascript');
   res.send(fs.readFileSync(backupPath, 'utf8'));
 });
