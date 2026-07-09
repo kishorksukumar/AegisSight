@@ -853,9 +853,18 @@ app.post('/api/jobs', requireAdmin, (req, res) => {
   if (!name || !agent_id || !destination_id || !cron_schedule || !source_paths) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
-  if (!Array.isArray(source_paths) || source_paths.length === 0) {
-    return res.status(400).json({ error: 'source_paths must be a non-empty array' });
+
+  const isDb = (backup_type === 'mysql' || backup_type === 'postgres');
+  if (isDb) {
+    if (typeof source_paths !== 'object' || Array.isArray(source_paths) || !source_paths.database) {
+      return res.status(400).json({ error: 'Database details are required (including database name)' });
+    }
+  } else {
+    if (!Array.isArray(source_paths) || source_paths.length === 0) {
+      return res.status(400).json({ error: 'source_paths must be a non-empty array' });
+    }
   }
+
   if (typeof cron_schedule !== 'string' || cron_schedule.split(' ').length < 5) {
     return res.status(400).json({ error: 'Invalid cron_schedule format' });
   }
