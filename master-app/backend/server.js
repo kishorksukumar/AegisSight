@@ -193,7 +193,7 @@ app.use(verifyToken);
 
 app.get('/api/dashboard/summary', (req, res) => {
   try {
-    const agents = db.prepare('SELECT id, name, hostname, ip_address, platform, status, last_seen, uptime FROM agents').all();
+    const agents = db.prepare('SELECT id, name, hostname, ip_address, platform, status, last_seen, cpu_load, ram_usage, uptime FROM agents').all();
     const withHistory = agents.map(agent => {
       try {
         const history = db.prepare(`
@@ -251,7 +251,7 @@ app.get('/api/agents/:id/summary', (req, res) => {
   try {
     const { id } = req.params;
 
-    const agent = db.prepare('SELECT id, name, hostname, ip_address, platform, status, last_seen, uptime FROM agents WHERE id = ?').get(id);
+    const agent = db.prepare('SELECT id, name, hostname, ip_address, platform, status, last_seen, cpu_load, ram_usage, uptime FROM agents WHERE id = ?').get(id);
     if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
     let status_history = [];
