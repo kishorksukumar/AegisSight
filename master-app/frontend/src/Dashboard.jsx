@@ -116,7 +116,7 @@ export default function Dashboard() {
     let fetchTimeout;
     const throttledFetch = () => {
       if (fetchTimeout) return;
-      fetchData();
+      fetchData(true);
       fetchTimeout = setTimeout(() => {
         fetchTimeout = null;
       }, 2000);
@@ -141,9 +141,9 @@ export default function Dashboard() {
     };
   }, []);
 
-  const fetchData = async () => {
+  const fetchData = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const res = await apiFetch(`${API_URL}/dashboard/summary`);
       if (res.ok) {
         const data = await res.json();
@@ -164,7 +164,7 @@ export default function Dashboard() {
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 

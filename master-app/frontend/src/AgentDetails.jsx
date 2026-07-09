@@ -136,10 +136,10 @@ export default function AgentDetails() {
     };
 
     socket.on('dashboard:agents_updated', () => {
-      throttledFetch(fetchAll);
+      throttledFetch(() => fetchAll(true));
     });
     socket.on('dashboard:history_updated', () => {
-      throttledFetch(fetchAll);
+      throttledFetch(() => fetchAll(true));
     });
     socket.on('dashboard:restore_status', (data) => {
       setActiveRestores(prev => ({ ...prev, [data.restore_id]: data }));
@@ -152,9 +152,9 @@ export default function AgentDetails() {
     };
   }, [id]);
 
-  const fetchAll = async () => {
+  const fetchAll = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const res = await apiFetch(`${API_URL}/agents/${id}/summary`);
       if (res.ok) {
         const data = await res.json();
@@ -177,7 +177,7 @@ export default function AgentDetails() {
     } catch(e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
