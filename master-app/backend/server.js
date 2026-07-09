@@ -27,7 +27,8 @@ function getSetting(key) {
 
 const checkCors = (origin, cb) => {
   const domain = getSetting('domain');
-  if (!origin || !domain || domain === 'localhost' || origin.includes(domain) || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+  const isIp = origin && /^(https?:\/\/)?(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(origin);
+  if (!origin || isIp || !domain || domain === 'localhost' || origin.includes(domain) || origin.includes('localhost') || origin.includes('127.0.0.1')) {
     cb(null, true);
   } else {
     cb(new Error('Not allowed by CORS'));
