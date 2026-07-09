@@ -3,8 +3,8 @@ version: "3.9"
 services:
   backend:
     build:
-      context: ./master-app/backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: master-app/backend/Dockerfile
     container_name: aegissight-backend
     restart: unless-stopped
     env_file: .env
