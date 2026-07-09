@@ -987,17 +987,17 @@ npm init -y > /dev/null
 npm install socket.io-client axios node-cron archiver @aws-sdk/client-s3 @aws-sdk/lib-storage basic-ftp ssh2-sftp-client dotenv > /dev/null
 
 echo "Downloading agent scripts..."
-curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\\\${AEGISSIGHT_URL:-${serverUrl}}/api/agent-bundle.js?agent_id=$AGENT_ID" -o agent.js
-curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\\\${AEGISSIGHT_URL:-${serverUrl}}/api/backup-bundle.js?agent_id=$AGENT_ID" -o backup.js
+curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\${AEGISSIGHT_URL:-${serverUrl}}/api/agent-bundle.js?agent_id=$AGENT_ID" -o agent.js
+curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\${AEGISSIGHT_URL:-${serverUrl}}/api/backup-bundle.js?agent_id=$AGENT_ID" -o backup.js
 
 echo "Creating .env..."
-echo "AEGISSIGHT_URL=\\\${AEGISSIGHT_URL:-${serverUrl}}" > .env
+echo "AEGISSIGHT_URL=\${AEGISSIGHT_URL:-${serverUrl}}" > .env
 echo "AGENT_ID=$AGENT_ID" >> .env
 echo "AGENT_TOKEN=$AGENT_TOKEN" >> .env
 
-NODE_PATH=\\$(command -v node || echo "/usr/bin/node")
+NODE_PATH=$(command -v node || echo "/usr/bin/node")
 
-if [ "\\$EUID" -ne 0 ]; then
+if [ "$EUID" -ne 0 ]; then
   echo "Warning: Not running as root. Skipping Systemd service registration."
   echo "Install complete! Run locally with: node /opt/aegissight-agent/agent.js"
 elif ! command -v systemctl &>/dev/null; then
@@ -1014,7 +1014,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/aegissight-agent
-ExecStart=\\$NODE_PATH /opt/aegissight-agent/agent.js
+ExecStart=$NODE_PATH /opt/aegissight-agent/agent.js
 Restart=always
 RestartSec=10
 
