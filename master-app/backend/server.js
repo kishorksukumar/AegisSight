@@ -782,13 +782,21 @@ app.post('/api/destinations/verify', strictLimiter, requireAdmin, async (req, re
   const { type, config } = req.body;
   if (type === 's3') {
     try {
-      const client = new S3Client({
+      const s3Opts = {
         region: config.region,
         credentials: {
           accessKeyId: config.accessKeyId,
           secretAccessKey: config.secretAccessKey
         }
-      });
+      };
+      if (config.endpoint) {
+        let endpoint = config.endpoint.trim();
+        if (!/^https?:\/\//i.test(endpoint)) {
+          endpoint = `https://${endpoint}`;
+        }
+        s3Opts.endpoint = endpoint;
+      }
+      const client = new S3Client(s3Opts);
       await client.send(new HeadBucketCommand({ Bucket: config.bucket }));
       res.json({ success: true });
     } catch (err) {

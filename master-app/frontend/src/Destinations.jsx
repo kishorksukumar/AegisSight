@@ -171,6 +171,16 @@ export default function Destinations() {
                     <Grid container spacing={3}>
                       {formData.type === 's3' && (
                         <>
+                          <Grid item xs={12}>
+                            <TextField 
+                              label="Endpoint URL (Optional)" 
+                              fullWidth 
+                              value={fields.endpoint || ''} 
+                              onChange={e => handleFieldChange('endpoint', e.target.value)} 
+                              placeholder="e.g. hel1.your-objectstorage.com (for Hetzner, MinIO, etc.)"
+                              helperText="Leave empty for standard AWS S3. For other providers, enter the endpoint host."
+                            />
+                          </Grid>
                           <Grid item xs={12} sm={6}>
                             <TextField 
                               label="Bucket Name" 

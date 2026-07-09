@@ -69,13 +69,21 @@ async function performBackup(job, onProgress) {
 
 async function streamToDestination(readableStream, type, config, filename, onProgress) {
   if (type === 's3' || !type) {
-    const s3 = new S3Client({
+    const s3Opts = {
       region: config.region || 'us-east-1',
       credentials: {
         accessKeyId: config.accessKeyId || process.env.AWS_ACCESS_KEY_ID || '',
         secretAccessKey: config.secretAccessKey || process.env.AWS_SECRET_ACCESS_KEY || ''
       }
-    });
+    };
+    if (config.endpoint) {
+      let endpoint = config.endpoint.trim();
+      if (!/^https?:\/\//i.test(endpoint)) {
+        endpoint = `https://${endpoint}`;
+      }
+      s3Opts.endpoint = endpoint;
+    }
+    const s3 = new S3Client(s3Opts);
     
     const passThrough = new stream.PassThrough();
     readableStream.pipe(passThrough);
@@ -140,13 +148,21 @@ async function streamToDestination(readableStream, type, config, filename, onPro
 
 async function streamFromDestination(writableStream, type, config, filename, onProgress) {
   if (type === 's3' || !type) {
-    const s3 = new S3Client({
+    const s3Opts = {
       region: config.region || 'us-east-1',
       credentials: {
         accessKeyId: config.accessKeyId || process.env.AWS_ACCESS_KEY_ID || '',
         secretAccessKey: config.secretAccessKey || process.env.AWS_SECRET_ACCESS_KEY || ''
       }
-    });
+    };
+    if (config.endpoint) {
+      let endpoint = config.endpoint.trim();
+      if (!/^https?:\/\//i.test(endpoint)) {
+        endpoint = `https://${endpoint}`;
+      }
+      s3Opts.endpoint = endpoint;
+    }
+    const s3 = new S3Client(s3Opts);
     
     onProgress({ logs: `Connecting to S3 to download ${filename}...`, percentage: 10 });
     const response = await s3.send(new GetObjectCommand({
