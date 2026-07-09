@@ -240,7 +240,8 @@ app.get('/api/dashboard/summary', (req, res) => {
       agents: withHistory,
       history,
       downtime,
-      destinations
+      destinations,
+      server_time: new Date().toISOString()
     });
   } catch(err) {
     res.status(500).json({ error: err.message });
@@ -292,7 +293,8 @@ app.get('/api/agents/:id/summary', (req, res) => {
       agent: { ...agent, status_history },
       history,
       jobs,
-      destinations
+      destinations,
+      server_time: new Date().toISOString()
     });
   } catch(err) {
     res.status(500).json({ error: err.message });
@@ -878,11 +880,28 @@ app.post('/api/jobs', requireAdmin, (req, res) => {
   const jobId = typeof id === 'string' && id.startsWith('job_') ? id : `job_${crypto.randomUUID()}`;
 
   const stmt = db.prepare(`
-    INSERT INTO backup_jobs (id, agent_id, name, source_paths, destination_id, backup_type, cron_schedule)
+    INSERT OR REPLACE INTO backup_jobs (id, agent_id, name, source_paths, destination_id, backup_type, cron_schedule)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run(jobId, agent_id, name, JSON.stringify(source_paths), destination_id, backup_type || 'full', cron_schedule);
+  
+  // Notify agent to reload its cron schedule
+  io.to(`agent_${agent_id}`).emit('agent:reload_jobs');
   res.status(201).json({ success: true });
+});
+
+app.delete('/api/jobs/:id', requireAdmin, (req, res) => {
+  try {
+    const { id } = req.params;
+    const job = db.prepare('SELECT agent_id FROM backup_jobs WHERE id = ?').get(id);
+    if (job) {
+      db.prepare('DELETE FROM backup_jobs WHERE id = ?').run(id);
+      io.to(`agent_${job.agent_id}`).emit('agent:reload_jobs');
+    }
+    res.json({ success: true });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/history', (req, res) => {

@@ -191,3 +191,5 @@ socket.on("agent:trigger_restore", async (options) => {
     });
   }
 });
+
+socket.on("agent:reload_jobs", fetchJobs);

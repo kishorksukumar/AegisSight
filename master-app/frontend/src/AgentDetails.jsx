@@ -84,6 +84,7 @@ export default function AgentDetails() {
   const [destinations, setDestinations] = useState([]);
   const [statusHistory, setStatusHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [serverTime, setServerTime] = useState(null);
   
   // Rename states
   const [renameOpen, setRenameOpen] = useState(false);
@@ -158,6 +159,7 @@ export default function AgentDetails() {
       const res = await apiFetch(`${API_URL}/agents/${id}/summary`);
       if (res.ok) {
         const data = await res.json();
+        if (data.server_time) setServerTime(data.server_time);
         if (data.agent) {
           setAgent(data.agent);
           setNewName(data.agent.name || '');
@@ -267,6 +269,101 @@ export default function AgentDetails() {
       }
     } catch(err) {
       alert('Delete request failed');
+    }
+  };
+
+  const handleNewJobClick = () => {
+    setJobForm({
+      id: '',
+      name: 'Scheduled Backup',
+      destination_id: destinations[0]?.id || '',
+      source_paths: '["/var/www/html", "/etc"]',
+      exclude_paths: '["/proc", "/sys", "/dev", "/run", "/mnt", "/tmp"]',
+      backup_type: 'full',
+      cron_schedule: '0 2 * * *',
+      schedule_type: 'daily',
+      start_time: '02:00',
+      weekly_day: '1',
+      monthly_day: '1'
+    });
+    setDbConfig({
+      host: 'localhost',
+      port: '',
+      user: 'root',
+      password: '',
+      database: ''
+    });
+    setJobOpen(true);
+  };
+
+  const handleEditJob = (job) => {
+    const isDb = (job.backup_type === 'mysql' || job.backup_type === 'postgres');
+    let dbConf = { host: 'localhost', port: '', user: 'root', password: '', database: '' };
+    let sources = '';
+    
+    if (isDb) {
+      try {
+        dbConf = JSON.parse(job.source_paths);
+      } catch(e) {}
+    } else {
+      sources = job.source_paths;
+    }
+
+    const cronParts = job.cron_schedule.split(' ');
+    let schedType = 'custom';
+    let startTime = '02:00';
+    let weeklyDay = '1';
+    let monthlyDay = '1';
+
+    if (cronParts.length === 5) {
+      const [min, hour, dom, mon, dow] = cronParts;
+      const pad = (n) => String(n).padStart(2, '0');
+      if (dom === '*' && mon === '*' && dow === '*') {
+        schedType = 'daily';
+        startTime = `${pad(hour)}:${pad(min)}`;
+      } else if (dom === '*' && mon === '*' && dow !== '*') {
+        schedType = 'weekly';
+        startTime = `${pad(hour)}:${pad(min)}`;
+        weeklyDay = dow;
+      } else if (dom !== '*' && mon === '*' && dow === '*') {
+        schedType = 'monthly';
+        startTime = `${pad(hour)}:${pad(min)}`;
+        monthlyDay = dom;
+      }
+    }
+
+    setJobForm({
+      id: job.id,
+      name: job.name,
+      destination_id: job.destination_id,
+      source_paths: sources,
+      exclude_paths: job.exclude_paths || '',
+      backup_type: job.backup_type || 'full',
+      cron_schedule: job.cron_schedule,
+      schedule_type: schedType,
+      start_time: startTime,
+      weekly_day: weeklyDay,
+      monthly_day: monthlyDay
+    });
+
+    if (isDb) {
+      setDbConfig(dbConf);
+    }
+    
+    setJobOpen(true);
+  };
+
+  const handleDeleteJob = async (jobId) => {
+    if (!window.confirm("Are you sure you want to delete this backup job?")) return;
+    try {
+      const res = await apiFetch(`${API_URL}/jobs/${jobId}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchAll(true);
+      } else {
+        alert("Failed to delete backup job");
+      }
+    } catch(err) {
+      alert("Error deleting job");
     }
   };
 
@@ -530,7 +627,7 @@ export default function AgentDetails() {
             variant="contained"
             color="primary"
             startIcon={<AddIcon />}
-            onClick={() => setJobOpen(true)}
+            onClick={handleNewJobClick}
             sx={{ fontWeight: 600 }}
           >
             Schedule Backup Job
@@ -573,12 +670,20 @@ export default function AgentDetails() {
                     {agent.platform || 'N/A'}
                   </Typography>
                 </Grid>
-                <Grid item xs={12}>
+                <Grid item xs={6}>
                   <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                     LAST HEARTBEAT
                   </Typography>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     {agent.last_seen ? formatDistanceToNow(new Date(agent.last_seen + 'Z'), { addSuffix: true }) : 'Never seen'}
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                    MASTER SERVER TIME
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: 'primary.main', fontFamily: 'monospace' }}>
+                    {serverTime ? new Date(serverTime).toLocaleString() : 'Loading...'}
                   </Typography>
                 </Grid>
               </Grid>
@@ -795,6 +900,7 @@ export default function AgentDetails() {
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Schedule</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Details / Targets</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }} align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -825,11 +931,19 @@ export default function AgentDetails() {
                       )}
                     </TableCell>
                     <TableCell>{getStatusChip(job.is_active ? 'active' : 'paused')}</TableCell>
+                    <TableCell align="right">
+                      <IconButton size="small" color="primary" onClick={() => handleEditJob(job)} sx={{ mr: 1 }}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" color="error" onClick={() => handleDeleteJob(job.id)}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
                   </TableRow>
                 ))}
                 {jobs.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                       No jobs scheduled for this agent.
                     </TableCell>
                   </TableRow>
