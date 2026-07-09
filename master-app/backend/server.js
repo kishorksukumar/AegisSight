@@ -802,7 +802,9 @@ app.get('/api/agents/:id/jobs', (req, res) => {
     LEFT JOIN destinations d ON j.destination_id = d.id 
     WHERE j.agent_id = ?
   `).all(req.params.id);
-  res.json(jobs.map(j => ({ ...j, dest_config: j.dest_config ? decrypt(j.dest_config) : null })));
+  const parsedJobs = jobs.map(j => ({ ...j, dest_config: j.dest_config ? decrypt(j.dest_config) : null }));
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  res.json({ jobs: parsedJobs, timezone: tz });
 });
 
 app.put('/api/agents/:id/restore', strictLimiter, requireAdmin, (req, res) => {

@@ -66,15 +66,23 @@ async function fetchJobs() {
     const res = await axios.get(`${AEGISSIGHT_URL}/api/agents/${AGENT_ID}/jobs`, {
       headers: { Authorization: `Bearer ${AGENT_TOKEN}` }
     });
-    currentJobs = res.data;
-    console.log(`Fetched ${currentJobs.length} backup jobs.`);
-    scheduleJobs();
+    let jobs = [];
+    let timezone = 'UTC';
+    if (Array.isArray(res.data)) {
+      jobs = res.data;
+    } else if (res.data && Array.isArray(res.data.jobs)) {
+      jobs = res.data.jobs;
+      timezone = res.data.timezone || 'UTC';
+    }
+    currentJobs = jobs;
+    console.log(`Fetched ${currentJobs.length} backup jobs. Timezone: ${timezone}`);
+    scheduleJobs(timezone);
   } catch(err) {
     console.error("Failed to fetch jobs:", err.message);
   }
 }
 
-function scheduleJobs() {
+function scheduleJobs(timezone = 'UTC') {
   // Clear existing
   for (const taskId in cronTasks) {
     cronTasks[taskId].stop();
@@ -84,10 +92,12 @@ function scheduleJobs() {
   currentJobs.forEach(job => {
     if (!job.is_active) return;
     
-    console.log(`Scheduling job '${job.name}' with cron: ${job.cron_schedule}`);
+    console.log(`Scheduling job '${job.name}' with cron: ${job.cron_schedule} in timezone ${timezone}`);
     const task = cron.schedule(job.cron_schedule, () => {
       console.log(`Executing Cron Job: ${job.name}`);
       executeJob(job);
+    }, {
+      timezone: timezone
     });
     
     cronTasks[job.id] = task;
