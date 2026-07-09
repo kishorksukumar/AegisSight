@@ -126,11 +126,24 @@ export default function AgentDetails() {
     const socket = io({ withCredentials: true });
     socketRef.current = socket;
     
+    let fetchTimeout;
+    const throttledFetch = (callback) => {
+      if (fetchTimeout) return;
+      callback();
+      fetchTimeout = setTimeout(() => {
+        fetchTimeout = null;
+      }, 2000);
+    };
+
     socket.on('dashboard:agents_updated', () => {
-      fetchAgent();
-      fetchStatusHistory();
+      throttledFetch(() => {
+        fetchAgent();
+        fetchStatusHistory();
+      });
     });
-    socket.on('dashboard:history_updated', fetchHistory);
+    socket.on('dashboard:history_updated', () => {
+      throttledFetch(fetchHistory);
+    });
     socket.on('dashboard:restore_status', (data) => {
       setActiveRestores(prev => ({ ...prev, [data.restore_id]: data }));
     });
@@ -138,6 +151,7 @@ export default function AgentDetails() {
     return () => { 
       socket.disconnect(); 
       socketRef.current = null; 
+      if (fetchTimeout) clearTimeout(fetchTimeout);
     };
   }, [id]);
 
@@ -161,14 +175,20 @@ export default function AgentDetails() {
   const fetchHistory = async () => {
     try {
       const res = await apiFetch(`${API_URL}/agents/${id}/history`);
-      if (res.ok) setHistory(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setHistory(data);
+      }
     } catch (e) {}
   };
 
   const fetchJobs = async () => {
     try {
       const res = await apiFetch(`${API_URL}/agents/${id}/jobs`);
-      if (res.ok) setJobs(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setJobs(data);
+      }
     } catch (e) {}
   };
 
@@ -177,9 +197,11 @@ export default function AgentDetails() {
       const res = await apiFetch(`${API_URL}/destinations`);
       if (res.ok) {
         const data = await res.json();
-        setDestinations(data);
-        if (data.length > 0) {
-          setJobForm(f => ({ ...f, destination_id: data[0].id }));
+        if (Array.isArray(data)) {
+          setDestinations(data);
+          if (data.length > 0) {
+            setJobForm(f => ({ ...f, destination_id: data[0].id }));
+          }
         }
       }
     } catch (e) {}
@@ -188,7 +210,10 @@ export default function AgentDetails() {
   const fetchStatusHistory = async () => {
     try {
       const res = await apiFetch(`${API_URL}/agents/${id}/status-history`);
-      if (res.ok) setStatusHistory(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setStatusHistory(data);
+      }
     } catch (e) {}
   };
 

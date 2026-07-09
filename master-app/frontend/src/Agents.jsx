@@ -132,14 +132,15 @@ export default function Agents() {
         apiFetch(`${API_URL}/agents`),
         apiFetch(`${API_URL}/destinations`)
       ]);
-      const aData = await aRes.json();
-      const dData = await dRes.json();
-      
-      setAgents(aData);
-      setDestinations(dData);
-      
-      if (aData.length > 0 && !jobForm.agent_id) setJobForm(f => ({...f, agent_id: aData[0].id}));
-      if (dData.length > 0 && !jobForm.destination_id) setJobForm(f => ({...f, destination_id: dData[0].id}));
+      if (aRes.ok && dRes.ok) {
+        const aData = await aRes.json();
+        const dData = await dRes.json();
+        if (Array.isArray(aData)) setAgents(aData);
+        if (Array.isArray(dData)) setDestinations(dData);
+        
+        if (Array.isArray(aData) && aData.length > 0 && !jobForm.agent_id) setJobForm(f => ({...f, agent_id: aData[0].id}));
+        if (Array.isArray(dData) && dData.length > 0 && !jobForm.destination_id) setJobForm(f => ({...f, destination_id: dData[0].id}));
+      }
     } catch (e) {
       console.error(e);
     }

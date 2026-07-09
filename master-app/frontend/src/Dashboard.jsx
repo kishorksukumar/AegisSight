@@ -112,8 +112,17 @@ export default function Dashboard() {
     fetchData();
     const socket = io({ withCredentials: true });
     
-    socket.on('dashboard:agents_updated', fetchData);
-    socket.on('dashboard:history_updated', fetchData);
+    let fetchTimeout;
+    const throttledFetch = () => {
+      if (fetchTimeout) return;
+      fetchData();
+      fetchTimeout = setTimeout(() => {
+        fetchTimeout = null;
+      }, 2000);
+    };
+
+    socket.on('dashboard:agents_updated', throttledFetch);
+    socket.on('dashboard:history_updated', throttledFetch);
     
     socket.on('dashboard:metrics_updated', (data) => {
       setAgents(prev => prev.map(a => 
@@ -125,17 +134,24 @@ export default function Dashboard() {
       ));
     });
 
-    return () => socket.disconnect();
+    return () => {
+      socket.disconnect();
+      if (fetchTimeout) clearTimeout(fetchTimeout);
+    };
   }, []);
 
   const fetchData = async () => {
     try {
       const agentsRes = await apiFetch(`${API_URL}/agents`);
+      if (!agentsRes.ok) return;
       const agentsData = await agentsRes.json();
+      if (!Array.isArray(agentsData)) return;
       setAgents(agentsData);
 
       const histRes = await apiFetch(`${API_URL}/history`);
+      if (!histRes.ok) return;
       const histData = await histRes.json();
+      if (!Array.isArray(histData)) return;
       setHistory(histData);
 
       let downCount = 0;
@@ -143,8 +159,10 @@ export default function Dashboard() {
         const downRes = await apiFetch(`${API_URL}/downtime`);
         if (downRes.ok) {
           const downData = await downRes.json();
-          setDowntimeEvents(downData);
-          downCount = downData.length;
+          if (Array.isArray(downData)) {
+            setDowntimeEvents(downData);
+            downCount = downData.length;
+          }
         }
       } catch (e) {}
 

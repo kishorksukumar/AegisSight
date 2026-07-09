@@ -45,7 +45,10 @@ export default function Destinations() {
   const fetchDestinations = async () => {
     try {
       const res = await apiFetch(`${API_URL}/destinations`);
-      setDestinations(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setDestinations(data);
+      }
     } catch(e) {
       console.error(e);
     }
