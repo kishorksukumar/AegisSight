@@ -433,7 +433,7 @@ export default function AgentDetails() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: `job_${Date.now()}`,
+          id: jobForm.id || `job_${Date.now()}`,
           agent_id: id,
           name: jobForm.name,
           source_paths: parsedSources,
