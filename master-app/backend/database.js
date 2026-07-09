@@ -11,6 +11,7 @@ if (!fs.existsSync(dataDir)) {
 const dbPath = path.join(dataDir, 'aegissight.sqlite');
 const db = new Database(dbPath); // Removed verbose for cleaner startup logs
 db.pragma('foreign_keys = ON');
+db.pragma('journal_mode = WAL');
 
 // Clean up expired sessions on startup
 try { db.prepare("DELETE FROM sessions WHERE created_at < datetime('now', '-24 hours')").run(); } catch(e) {}

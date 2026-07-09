@@ -804,6 +804,21 @@ app.post('/api/destinations', requireAdmin, (req, res) => {
   res.status(201).json({ success: true });
 });
 
+app.delete('/api/destinations/:id', requireAdmin, (req, res) => {
+  const { id } = req.params;
+  try {
+    const inUse = db.prepare('SELECT COUNT(*) as count FROM backup_jobs WHERE destination_id = ?').get(id).count;
+    if (inUse > 0) {
+      return res.status(400).json({ error: 'Cannot delete destination because it is currently in use by active backup jobs.' });
+    }
+    db.prepare('DELETE FROM destinations WHERE id = ?').run(id);
+    res.json({ success: true, message: 'Destination deleted successfully.' });
+  } catch (err) {
+    console.error('Error deleting destination:', err);
+    res.status(500).json({ error: 'Failed to delete destination.' });
+  }
+});
+
 app.post('/api/destinations/verify', strictLimiter, requireAdmin, async (req, res) => {
   const { type, config } = req.body;
   if (type === 's3') {

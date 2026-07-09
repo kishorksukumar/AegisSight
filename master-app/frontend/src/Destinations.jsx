@@ -3,7 +3,8 @@ import { apiFetch } from './api';
 import {
   Box, Card, CardContent, Typography, Button, TextField, MenuItem,
   Select, InputLabel, FormControl, Grid, Paper, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, Chip, Alert, CircularProgress, useTheme
+  TableCell, TableContainer, TableHead, TableRow, Chip, Alert, CircularProgress, useTheme,
+  IconButton, Dialog, DialogTitle, DialogContent, DialogActions
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -11,7 +12,8 @@ import {
   Check as CheckIcon,
   Cloud as CloudIcon,
   Storage as StorageIcon,
-  Power as PowerIcon
+  Power as PowerIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 
 const API_URL = '/api';
@@ -31,6 +33,11 @@ export default function Destinations() {
   const [verifyStatus, setVerifyStatus] = useState('idle'); // idle, verifying, success, error
   const [verifyError, setVerifyError] = useState('');
 
+  // Delete states
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+
   useEffect(() => {
     fetchDestinations();
   }, []);
@@ -41,6 +48,24 @@ export default function Destinations() {
       setDestinations(await res.json());
     } catch(e) {
       console.error(e);
+    }
+  };
+
+  const handleDeleteSubmit = async () => {
+    setDeleteError('');
+    try {
+      const res = await apiFetch(`${API_URL}/destinations/${deleteTargetId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setDeleteOpen(false);
+        fetchDestinations();
+      } else {
+        const data = await res.json();
+        setDeleteError(data.error || 'Failed to delete storage destination.');
+      }
+    } catch(err) {
+      setDeleteError('Network error while deleting destination.');
     }
   };
 
@@ -327,6 +352,7 @@ export default function Destinations() {
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>ID</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Name</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Type</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -344,11 +370,24 @@ export default function Destinations() {
                         sx={{ fontWeight: 600, borderRadius: '6px' }}
                       />
                     </TableCell>
+                    <TableCell>
+                      <IconButton 
+                        color="error" 
+                        size="small" 
+                        onClick={() => {
+                          setDeleteTargetId(d.id);
+                          setDeleteError('');
+                          setDeleteOpen(true);
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
                   </TableRow>
                 ))}
                 {destinations.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={3} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    <TableCell colSpan={4} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                       No destinations configured.
                     </TableCell>
                   </TableRow>
@@ -358,6 +397,42 @@ export default function Destinations() {
           </TableContainer>
         </CardContent>
       </Card>
+      {/* Delete Dialog Modal */}
+      <Dialog 
+        open={deleteOpen} 
+        onClose={() => setDeleteOpen(false)}
+        PaperProps={{
+          sx: {
+            border: `1px solid ${theme => theme.palette.mode === 'dark' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(0, 0, 0, 0.08)'}`,
+            bgcolor: 'background.paper',
+            borderRadius: 3,
+            minWidth: 320
+          }
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: 700, fontFamily: "'Outfit', sans-serif" }}>
+          Delete Storage Destination
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
+            Are you sure you want to permanently delete this storage destination (<strong>{deleteTargetId}</strong>)?
+          </Typography>
+          
+          {deleteError && (
+            <Alert severity="error" sx={{ mt: 2, borderRadius: '8px' }}>
+              {deleteError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button onClick={() => setDeleteOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleDeleteSubmit} variant="contained" color="error">
+            Delete Permanently
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
