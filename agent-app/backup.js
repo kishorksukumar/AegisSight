@@ -5,7 +5,7 @@ const stream = require("stream");
 
 // Adapters
 const { Upload } = require("@aws-sdk/lib-storage");
-const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const ftp = require("basic-ftp");
 const Client = require("ssh2-sftp-client");
 
@@ -435,4 +435,55 @@ async function performRestore(options, onProgress) {
   });
 }
 
-module.exports = { performBackup, performRestore };
+async function deleteArchive(options) {
+  const { archive_name, dest_type, dest_config } = options;
+  const config = dest_config ? JSON.parse(dest_config) : {};
+
+  if (dest_type === 's3' || !dest_type) {
+    const s3Opts = {
+      region: config.region || 'us-east-1',
+      credentials: {
+        accessKeyId: config.accessKeyId || process.env.AWS_ACCESS_KEY_ID || '',
+        secretAccessKey: config.secretAccessKey || process.env.AWS_SECRET_ACCESS_KEY || ''
+      }
+    };
+    if (config.endpoint) {
+      let endpoint = config.endpoint.trim();
+      if (!/^https?:\/\//i.test(endpoint)) endpoint = `https://${endpoint}`;
+      s3Opts.endpoint = endpoint;
+    }
+    const s3 = new S3Client(s3Opts);
+    await s3.send(new DeleteObjectCommand({
+      Bucket: config.bucket || '',
+      Key: archive_name
+    }));
+  } 
+  else if (dest_type === 'ftp') {
+    const client = new ftp.Client();
+    try {
+      await client.access({
+        host: config.host,
+        user: config.user,
+        password: config.password,
+        secure: config.secure || false
+      });
+      await client.cd("backups");
+      await client.remove(archive_name);
+    } finally {
+      client.close();
+    }
+  }
+  else if (dest_type === 'sftp') {
+    const sftp = new Client();
+    await sftp.connect({
+      host: config.host,
+      port: config.port || 22,
+      username: config.user,
+      password: config.password,
+    });
+    await sftp.delete(`/backups/${archive_name}`);
+    await sftp.end();
+  }
+}
+
+module.exports = { performBackup, performRestore, deleteArchive };

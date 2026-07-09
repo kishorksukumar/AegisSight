@@ -3,7 +3,7 @@ const { io } = require("socket.io-client");
 const axios = require("axios");
 const os = require("os");
 const cron = require("node-cron");
-const { performBackup, performRestore } = require("./backup");
+const { performBackup, performRestore, deleteArchive } = require("./backup");
 
 const AEGISSIGHT_URL = process.env.AEGISSIGHT_URL || "http://localhost:4000";
 const AGENT_ID = process.env.AGENT_ID || `agent-${os.hostname()}`;
@@ -203,3 +203,13 @@ socket.on("agent:trigger_restore", async (options) => {
 });
 
 socket.on("agent:reload_jobs", fetchJobs);
+
+socket.on("agent:delete_archive", async (data) => {
+  try {
+    console.log(`Requested deletion of archive: ${data.archive_name}`);
+    await deleteArchive(data);
+    console.log(`Archive ${data.archive_name} deleted successfully.`);
+  } catch(err) {
+    console.error(`Failed to delete archive ${data.archive_name}:`, err.message);
+  }
+});

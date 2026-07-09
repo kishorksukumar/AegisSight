@@ -208,7 +208,7 @@ app.get('/api/dashboard/summary', (req, res) => {
     });
 
     const history = db.prepare(`
-      SELECT h.*, j.name as job_name, a.hostname as agent_hostname 
+      SELECT h.*, j.name as job_name, j.backup_type, j.source_paths, j.exclude_paths, a.hostname as agent_hostname 
       FROM backup_history h
       JOIN backup_jobs j ON h.job_id = j.id
       JOIN agents a ON j.agent_id = a.id
@@ -266,7 +266,7 @@ app.get('/api/agents/:id/summary', (req, res) => {
     } catch(e) {}
 
     const history = db.prepare(`
-      SELECT h.*, j.name as job_name
+      SELECT h.*, j.name as job_name, j.backup_type, j.source_paths, j.exclude_paths
       FROM backup_history h
       JOIN backup_jobs j ON h.job_id = j.id
       WHERE j.agent_id = ?
@@ -818,7 +818,7 @@ app.get('/api/agents/:id/jobs', (req, res) => {
 });
 
 app.put('/api/agents/:id/restore', strictLimiter, requireAdmin, (req, res) => {
-  const { history_id, target_paths, restore_dir } = req.body;
+  const { history_id, target_paths, restore_dir, db_config } = req.body;
   
   if (!history_id) return res.status(400).json({ error: 'history_id is required' });
 
@@ -846,12 +846,18 @@ app.put('/api/agents/:id/restore', strictLimiter, requireAdmin, (req, res) => {
     triggerSocketId: triggerSocketId
   });
 
+  const isDb = (job.backup_type === 'mysql' || job.backup_type === 'postgres');
+  let finalSourcePaths = job.source_paths;
+  if (isDb && db_config) {
+    finalSourcePaths = JSON.stringify(db_config);
+  }
+
   io.to(`agent_${req.params.id}`).emit('agent:trigger_restore', {
     restore_id,
     history_id,
     archive_name: history.archive_name,
     backup_type: job.backup_type,
-    source_paths: job.source_paths,
+    source_paths: finalSourcePaths,
     dest_type: destination.type,
     dest_config: decrypt(destination.config),
     target_paths: target_paths || [],
@@ -862,7 +868,7 @@ app.put('/api/agents/:id/restore', strictLimiter, requireAdmin, (req, res) => {
 });
 
 app.post('/api/jobs', requireAdmin, (req, res) => {
-  const { id, agent_id, name, source_paths, destination_id, backup_type, cron_schedule } = req.body;
+  const { id, agent_id, name, source_paths, exclude_paths, destination_id, backup_type, cron_schedule, retention_days } = req.body;
   
   if (!name || !agent_id || !destination_id || !cron_schedule || !source_paths) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -892,10 +898,20 @@ app.post('/api/jobs', requireAdmin, (req, res) => {
   const jobId = typeof id === 'string' && id.startsWith('job_') ? id : `job_${crypto.randomUUID()}`;
 
   const stmt = db.prepare(`
-    INSERT OR REPLACE INTO backup_jobs (id, agent_id, name, source_paths, destination_id, backup_type, cron_schedule)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO backup_jobs (id, agent_id, name, source_paths, exclude_paths, destination_id, backup_type, cron_schedule, retention_days)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run(jobId, agent_id, name, JSON.stringify(source_paths), destination_id, backup_type || 'full', cron_schedule);
+  stmt.run(
+    jobId, 
+    agent_id, 
+    name, 
+    JSON.stringify(source_paths), 
+    exclude_paths ? JSON.stringify(exclude_paths) : '[]', 
+    destination_id, 
+    backup_type || 'full', 
+    cron_schedule, 
+    parseInt(retention_days) || 0
+  );
   
   // Notify agent to reload its cron schedule
   io.to(`agent_${agent_id}`).emit('agent:reload_jobs');
@@ -933,7 +949,7 @@ app.post('/api/jobs/:id/run', requireAdmin, (req, res) => {
 
 app.get('/api/history', (req, res) => {
   const history = db.prepare(`
-    SELECT h.*, j.name as job_name, a.hostname as agent_hostname 
+    SELECT h.*, j.name as job_name, j.backup_type, j.source_paths, j.exclude_paths, a.hostname as agent_hostname 
     FROM backup_history h
     JOIN backup_jobs j ON h.job_id = j.id
     JOIN agents a ON j.agent_id = a.id
@@ -1140,6 +1156,43 @@ function recordDowntimeEvent(agentId, newStatus) {
   }
 }
 
+function cleanupExpiredBackups(jobId) {
+  try {
+    const job = db.prepare('SELECT agent_id, retention_days, destination_id FROM backup_jobs WHERE id = ?').get(jobId);
+    if (!job || !job.retention_days || job.retention_days <= 0) return;
+
+    const expired = db.prepare(`
+      SELECT h.id, h.archive_name
+      FROM backup_history h
+      WHERE h.job_id = ? AND h.status = 'success' AND h.archive_name IS NOT NULL
+        AND datetime(h.start_time) < datetime('now', '-' || ? || ' days')
+    `).all(jobId, job.retention_days);
+
+    if (expired.length === 0) return;
+
+    console.log(`Found ${expired.length} expired backups for job ${jobId} to clean up (Retention: ${job.retention_days} days).`);
+
+    const destination = db.prepare('SELECT type, config FROM destinations WHERE id = ?').get(job.destination_id);
+
+    expired.forEach(item => {
+      // 1. Trigger deletion on the agent
+      if (destination) {
+        io.to(`agent_${job.agent_id}`).emit('agent:delete_archive', {
+          archive_name: item.archive_name,
+          dest_type: destination.type,
+          dest_config: decrypt(destination.config)
+        });
+      }
+
+      // 2. Delete history record
+      db.prepare('DELETE FROM backup_history WHERE id = ?').run(item.id);
+      console.log(`Cleaned up expired backup history record: ${item.id} / ${item.archive_name}`);
+    });
+  } catch (err) {
+    console.error('Error during expired backups cleanup:', err);
+  }
+}
+
 // WebSocket for Agent Communications
 io.use((socket, next) => {
   let sessionId;
@@ -1296,6 +1349,7 @@ io.on('connection', (socket) => {
             `Backup Job Succeeded: ${jobName}`,
             `Backup job "${jobName}" completed successfully on agent "${hostname}".\nArchive: ${archive_name || 'N/A'} (${file_size ? (file_size / 1024 / 1024).toFixed(2) + ' MB' : 'N/A'}).`
           );
+          cleanupExpiredBackups(job_id);
         } else {
           sendNotification(
             `Backup Job FAILED: ${jobName}`,

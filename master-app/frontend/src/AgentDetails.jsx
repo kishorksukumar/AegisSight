@@ -23,7 +23,9 @@ import {
   Edit as EditIcon,
   Add as AddIcon,
   Delete as DeleteIcon,
-  PlayArrow as PlayIcon
+  PlayArrow as PlayIcon,
+  Folder as FolderIcon,
+  Storage as StorageIcon
 } from '@mui/icons-material';
 
 const API_URL = "/api";
@@ -107,7 +109,8 @@ export default function AgentDetails() {
     schedule_type: 'daily',
     start_time: '02:00',
     weekly_day: '1',
-    monthly_day: '1'
+    monthly_day: '1',
+    retention_days: '0'
   });
 
   const [dbConfig, setDbConfig] = useState({
@@ -119,7 +122,15 @@ export default function AgentDetails() {
   });
 
   const [restoreModal, setRestoreModal] = useState(null);
-  const [restoreForm, setRestoreForm] = useState({ target_paths: '', restore_dir: '' });
+  const [restoreForm, setRestoreForm] = useState({
+    target_paths: '',
+    restore_dir: '',
+    db_host: 'localhost',
+    db_port: '',
+    db_user: 'root',
+    db_password: '',
+    db_database: ''
+  });
   const [activeRestores, setActiveRestores] = useState({});
   const socketRef = useRef(null);
 
@@ -285,7 +296,8 @@ export default function AgentDetails() {
       schedule_type: 'daily',
       start_time: '02:00',
       weekly_day: '1',
-      monthly_day: '1'
+      monthly_day: '1',
+      retention_days: '0'
     });
     setDbConfig({
       host: 'localhost',
@@ -344,7 +356,8 @@ export default function AgentDetails() {
       schedule_type: schedType,
       start_time: startTime,
       weekly_day: weeklyDay,
-      monthly_day: monthlyDay
+      monthly_day: monthlyDay,
+      retention_days: String(job.retention_days || 0)
     });
 
     if (isDb) {
@@ -440,7 +453,8 @@ export default function AgentDetails() {
           exclude_paths: parsedExcludes,
           destination_id: jobForm.destination_id,
           backup_type: jobForm.backup_type,
-          cron_schedule: finalCron
+          cron_schedule: finalCron,
+          retention_days: parseInt(jobForm.retention_days) || 0
         })
       });
       if (res.ok) {
@@ -456,7 +470,8 @@ export default function AgentDetails() {
           schedule_type: 'daily',
           start_time: '02:00',
           weekly_day: '1',
-          monthly_day: '1'
+          monthly_day: '1',
+          retention_days: '0'
         });
         fetchJobs();
       } else {
@@ -468,23 +483,70 @@ export default function AgentDetails() {
     }
   };
 
+  const handleOpenRestoreModal = (item) => {
+    setRestoreModal(item);
+    
+    const isDb = (item.backup_type === 'mysql' || item.backup_type === 'postgres');
+    let dbConf = { host: 'localhost', port: '', user: 'root', password: '', database: '' };
+    
+    if (isDb && item.source_paths) {
+      try {
+        dbConf = JSON.parse(item.source_paths);
+      } catch(e) {}
+    }
+
+    setRestoreForm({
+      target_paths: '',
+      restore_dir: '',
+      db_host: dbConf.host || 'localhost',
+      db_port: dbConf.port || '',
+      db_user: dbConf.user || 'root',
+      db_password: dbConf.password || '',
+      db_database: dbConf.database || ''
+    });
+  };
+
+  const handleRestoreClickForJob = (job) => {
+    // Find successful runs of this job
+    const jobHistory = history.filter(h => h.job_id === job.id && h.status === 'success');
+    if (jobHistory.length === 0) {
+      alert("No successful backups found for this job yet.");
+      return;
+    }
+    handleOpenRestoreModal(jobHistory[0]);
+  };
+
   const handleRestoreSubmit = async (e) => {
     e.preventDefault();
     if (!restoreModal) return;
     try {
       const paths = restoreForm.target_paths.split(',').map(p => p.trim()).filter(Boolean);
+      const isDb = (restoreModal.backup_type === 'mysql' || restoreModal.backup_type === 'postgres');
       const socketId = socketRef.current?.id;
+      
+      const payload = {
+        history_id: restoreModal.id,
+        target_paths: paths,
+        restore_dir: restoreForm.restore_dir
+      };
+
+      if (isDb) {
+        payload.db_config = {
+          host: restoreForm.db_host,
+          port: restoreForm.db_port,
+          user: restoreForm.db_user,
+          password: restoreForm.db_password,
+          database: restoreForm.db_database
+        };
+      }
+
       const res = await apiFetch(`${API_URL}/agents/${id}/restore`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           ...(socketId ? { 'x-socket-id': socketId } : {})
         },
-        body: JSON.stringify({
-          history_id: restoreModal.id,
-          target_paths: paths,
-          restore_dir: restoreForm.restore_dir
-        })
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
         const data = await res.json();
@@ -493,7 +555,15 @@ export default function AgentDetails() {
           [data.restore_id]: { status: 'starting', progress: 0, logs: 'Initializing restore...' }
         }));
         setRestoreModal(null);
-        setRestoreForm({ target_paths: '', restore_dir: '' });
+        setRestoreForm({
+          target_paths: '',
+          restore_dir: '',
+          db_host: 'localhost',
+          db_port: '',
+          db_user: 'root',
+          db_password: '',
+          db_database: ''
+        });
       } else {
         const err = await res.json();
         alert('Restore failed: ' + err.error);
@@ -832,6 +902,7 @@ export default function AgentDetails() {
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Job Name</TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Type</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Status</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Progress</TableCell>
                   <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>Started</TableCell>
@@ -843,7 +914,24 @@ export default function AgentDetails() {
               <TableBody>
                 {history.map(item => (
                   <TableRow key={item.id}>
-                    <TableCell sx={{ fontWeight: 600 }}>{item.job_name}</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        { (item.backup_type === 'mysql' || item.backup_type === 'postgres') ? (
+                          <StorageIcon sx={{ fontSize: 18, color: 'secondary.main' }} />
+                        ) : (
+                          <FolderIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                        )}
+                        {item.job_name}
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={item.backup_type ? item.backup_type.toUpperCase() : 'FULL'} 
+                        size="small" 
+                        color={(item.backup_type === 'mysql' || item.backup_type === 'postgres') ? 'secondary' : 'default'}
+                        sx={{ fontWeight: 600, borderRadius: '4px' }}
+                      />
+                    </TableCell>
                     <TableCell>{getStatusChip(item.status)}</TableCell>
                     <TableCell>
                       {item.status === 'running' ? (
@@ -878,7 +966,7 @@ export default function AgentDetails() {
                           variant="contained" 
                           color="primary" 
                           size="small"
-                          onClick={() => setRestoreModal(item)}
+                          onClick={() => handleOpenRestoreModal(item)}
                           sx={{ py: 0.5 }}
                         >
                           Restore
@@ -889,7 +977,7 @@ export default function AgentDetails() {
                 ))}
                 {history.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                       No backup history for this agent yet.
                     </TableCell>
                   </TableRow>
@@ -921,7 +1009,16 @@ export default function AgentDetails() {
               <TableBody>
                 {jobs.map(job => (
                   <TableRow key={job.id}>
-                    <TableCell sx={{ fontWeight: 600 }}>{job.name}</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        { (job.backup_type === 'mysql' || job.backup_type === 'postgres') ? (
+                          <StorageIcon sx={{ fontSize: 18, color: 'secondary.main' }} />
+                        ) : (
+                          <FolderIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                        )}
+                        {job.name}
+                      </Box>
+                    </TableCell>
                     <TableCell>
                       <Chip 
                         label={job.backup_type ? job.backup_type.toUpperCase() : 'FULL'} 
@@ -950,6 +1047,11 @@ export default function AgentDetails() {
                       <Tooltip title="Run Backup Now">
                         <IconButton size="small" sx={{ color: 'success.main', mr: 1 }} onClick={() => handleRunJob(job.id)}>
                           <PlayIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Restore from Job Backups">
+                        <IconButton size="small" color="primary" onClick={() => handleRestoreClickForJob(job)} sx={{ mr: 1 }}>
+                          <RestoreIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Edit Job">
@@ -995,28 +1097,96 @@ export default function AgentDetails() {
         </DialogTitle>
         <DialogContent>
           {restoreModal && (
-            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-              Restore files from <strong>{restoreModal.job_name}</strong> created {formatDistanceToNow(new Date(restoreModal.start_time + 'Z'), { addSuffix: true })}.
-            </Typography>
+            <Box component="form" sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1, minWidth: 400 }}>
+              <FormControl fullWidth>
+                <InputLabel id="restore-point-label">Select Backup Point (Date/Time)</InputLabel>
+                <Select
+                  labelId="restore-point-label"
+                  label="Select Backup Point (Date/Time)"
+                  value={restoreModal.id}
+                  onChange={(e) => {
+                    const selected = history.find(h => h.id === e.target.value);
+                    if (selected) handleOpenRestoreModal(selected);
+                  }}
+                >
+                  {history
+                    .filter(h => h.job_id === restoreModal.job_id && h.status === 'success')
+                    .map(h => (
+                      <MenuItem key={h.id} value={h.id}>
+                        {new Date(h.start_time + 'Z').toLocaleString()} [{h.backup_type ? h.backup_type.toUpperCase() : 'FULL'}]
+                      </MenuItem>
+                    ))
+                  }
+                </Select>
+              </FormControl>
+
+              { (restoreModal.backup_type === 'mysql' || restoreModal.backup_type === 'postgres') ? (
+                <>
+                  <Typography variant="body2" sx={{ color: 'secondary.main', fontWeight: 600 }}>
+                    Database Restore Parameters ({restoreModal.backup_type.toUpperCase()})
+                  </Typography>
+                  <TextField
+                    label="DB Host"
+                    value={restoreForm.db_host}
+                    onChange={e => setRestoreForm({...restoreForm, db_host: e.target.value})}
+                    fullWidth
+                    required
+                  />
+                  <TextField
+                    label="DB Port"
+                    placeholder={restoreModal.backup_type === 'mysql' ? '3306' : '5432'}
+                    value={restoreForm.db_port}
+                    onChange={e => setRestoreForm({...restoreForm, db_port: e.target.value})}
+                    fullWidth
+                  />
+                  <TextField
+                    label="DB Username"
+                    value={restoreForm.db_user}
+                    onChange={e => setRestoreForm({...restoreForm, db_user: e.target.value})}
+                    fullWidth
+                    required
+                  />
+                  <TextField
+                    label="DB Password"
+                    type="password"
+                    value={restoreForm.db_password}
+                    onChange={e => setRestoreForm({...restoreForm, db_password: e.target.value})}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Target Database Name"
+                    value={restoreForm.db_database}
+                    onChange={e => setRestoreForm({...restoreForm, db_database: e.target.value})}
+                    fullWidth
+                    required
+                    helperText="Specify the database you want to import this dump into."
+                  />
+                </>
+              ) : (
+                <>
+                  <Typography variant="body2" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                    File System Restore Parameters ({restoreModal.backup_type.toUpperCase()})
+                  </Typography>
+                  <TextField
+                    label="Restore Directory (Optional)"
+                    value={restoreForm.restore_dir}
+                    onChange={e => setRestoreForm({...restoreForm, restore_dir: e.target.value})}
+                    placeholder="e.g. /opt/aegissight-restore"
+                    fullWidth
+                    helperText="Leave blank to overwrite files in their original locations."
+                  />
+                  <TextField
+                    label="Specific Paths to Restore (Optional)"
+                    value={restoreForm.target_paths}
+                    onChange={e => setRestoreForm({...restoreForm, target_paths: e.target.value})}
+                    placeholder="e.g. var/www/html/index.php, etc/nginx"
+                    fullWidth
+                    helperText="Comma separated. Note: paths in tar archives typically do not have a leading slash."
+                  />
+                </>
+              )}
+            </Box>
           )}
-          <Box component="form" sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-            <TextField
-              label="Restore Directory (Optional)"
-              value={restoreForm.restore_dir}
-              onChange={e => setRestoreForm({...restoreForm, restore_dir: e.target.value})}
-              placeholder="e.g. /opt/aegissight-restore"
-              fullWidth
-              helperText="Leave blank to overwrite files in their original locations."
-            />
-            <TextField
-              label="Specific Paths to Restore (Optional)"
-              value={restoreForm.target_paths}
-              onChange={e => setRestoreForm({...restoreForm, target_paths: e.target.value})}
-              placeholder="e.g. var/www/html/index.php, etc/nginx"
-              fullWidth
-              helperText="Comma separated. Note: paths in tar archives typically do not have a leading slash."
-            />
-          </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2.5 }}>
           <Button onClick={() => setRestoreModal(null)} color="inherit">
@@ -1097,6 +1267,16 @@ export default function AgentDetails() {
                 placeholder="e.g. Daily Backup"
                 fullWidth
                 required
+              />
+
+              <TextField
+                label="Retention Period (Days) - Optional"
+                type="number"
+                value={jobForm.retention_days}
+                onChange={e => setJobForm({ ...jobForm, retention_days: e.target.value })}
+                placeholder="e.g. 30"
+                fullWidth
+                helperText="Backups older than this will be automatically deleted. Leave as 0 or empty for unlimited."
               />
 
               <FormControl fullWidth>

@@ -48,6 +48,7 @@ db.exec(`
     s3_region TEXT,
     cron_schedule TEXT,
     is_active INTEGER DEFAULT 1,
+    retention_days INTEGER DEFAULT 0,
     FOREIGN KEY(agent_id) REFERENCES agents(id)
   );
 
@@ -92,6 +93,10 @@ try {
 
 try {
   db.prepare("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'").run();
+} catch (e) {}
+
+try {
+  db.prepare("ALTER TABLE backup_jobs ADD COLUMN retention_days INTEGER DEFAULT 0").run();
 } catch (e) {}
 
 // Seed default settings
