@@ -904,6 +904,21 @@ app.delete('/api/jobs/:id', requireAdmin, (req, res) => {
   }
 });
 
+app.post('/api/jobs/:id/run', requireAdmin, (req, res) => {
+  try {
+    const { id } = req.params;
+    const job = db.prepare('SELECT agent_id FROM backup_jobs WHERE id = ?').get(id);
+    if (job) {
+      io.to(`agent_${job.agent_id}`).emit('agent:trigger_job', id);
+      res.json({ success: true, message: 'Backup triggered successfully' });
+    } else {
+      res.status(404).json({ error: 'Job not found' });
+    }
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/history', (req, res) => {
   const history = db.prepare(`
     SELECT h.*, j.name as job_name, a.hostname as agent_hostname 

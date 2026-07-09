@@ -22,7 +22,8 @@ import {
   SettingsBackupRestore as RestoreIcon,
   Edit as EditIcon,
   Add as AddIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  PlayArrow as PlayIcon
 } from '@mui/icons-material';
 
 const API_URL = "/api";
@@ -364,6 +365,20 @@ export default function AgentDetails() {
       }
     } catch(err) {
       alert("Error deleting job");
+    }
+  };
+
+  const handleRunJob = async (jobId) => {
+    try {
+      const res = await apiFetch(`${API_URL}/jobs/${jobId}/run`, { method: 'POST' });
+      if (res.ok) {
+        alert("Backup job triggered successfully!");
+        fetchAll(true);
+      } else {
+        alert("Failed to trigger backup job");
+      }
+    } catch(err) {
+      alert("Error triggering job");
     }
   };
 
@@ -932,12 +947,21 @@ export default function AgentDetails() {
                     </TableCell>
                     <TableCell>{getStatusChip(job.is_active ? 'active' : 'paused')}</TableCell>
                     <TableCell align="right">
-                      <IconButton size="small" color="primary" onClick={() => handleEditJob(job)} sx={{ mr: 1 }}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton size="small" color="error" onClick={() => handleDeleteJob(job.id)}>
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
+                      <Tooltip title="Run Backup Now">
+                        <IconButton size="small" sx={{ color: 'success.main', mr: 1 }} onClick={() => handleRunJob(job.id)}>
+                          <PlayIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Edit Job">
+                        <IconButton size="small" color="primary" onClick={() => handleEditJob(job)} sx={{ mr: 1 }}>
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete Job">
+                        <IconButton size="small" color="error" onClick={() => handleDeleteJob(job.id)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
