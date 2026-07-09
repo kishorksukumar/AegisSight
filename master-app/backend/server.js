@@ -1067,7 +1067,7 @@ EOF
 
   systemctl daemon-reload
   systemctl enable aegissight-agent
-  systemctl start aegissight-agent
+  systemctl restart aegissight-agent
   echo "✓ AegisSight Agent registered and started successfully as a Systemd service!"
   echo "To view status: systemctl status aegissight-agent"
 fi
