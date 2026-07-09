@@ -1141,7 +1141,9 @@ io.on('connection', (socket) => {
       VALUES (@id, @hostname, @ip_address, @platform, 'online', CURRENT_TIMESTAMP)
       ON CONFLICT(id) DO UPDATE SET 
         status = 'online',
+        hostname = @hostname,
         ip_address = @ip_address,
+        platform = @platform,
         last_seen = CURRENT_TIMESTAMP
     `);
     

@@ -567,14 +567,6 @@ export default function AgentDetails() {
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                    HOSTNAME
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {agent.hostname || 'N/A'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                     OPERATING SYSTEM
                   </Typography>
                   <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'capitalize' }}>
@@ -583,7 +575,7 @@ export default function AgentDetails() {
                 </Grid>
                 <Grid item xs={12}>
                   <Typography variant="caption" display="block" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                    LAST HEARTBEAT RECORDED
+                    LAST HEARTBEAT
                   </Typography>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     {agent.last_seen ? formatDistanceToNow(new Date(agent.last_seen + 'Z'), { addSuffix: true }) : 'Never seen'}
