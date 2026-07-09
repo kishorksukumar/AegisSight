@@ -987,15 +987,47 @@ npm init -y > /dev/null
 npm install socket.io-client axios node-cron archiver @aws-sdk/client-s3 @aws-sdk/lib-storage basic-ftp ssh2-sftp-client dotenv > /dev/null
 
 echo "Downloading agent scripts..."
-curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\${AEGISSIGHT_URL:-${serverUrl}}/api/agent-bundle.js?agent_id=$AGENT_ID" -o agent.js
-curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\${AEGISSIGHT_URL:-${serverUrl}}/api/backup-bundle.js?agent_id=$AGENT_ID" -o backup.js
+curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\\\${AEGISSIGHT_URL:-${serverUrl}}/api/agent-bundle.js?agent_id=$AGENT_ID" -o agent.js
+curl -fsSL -H "Authorization: Bearer $AGENT_TOKEN" "\\\${AEGISSIGHT_URL:-${serverUrl}}/api/backup-bundle.js?agent_id=$AGENT_ID" -o backup.js
 
 echo "Creating .env..."
-echo "AEGISSIGHT_URL=\${AEGISSIGHT_URL:-${serverUrl}}" > .env
+echo "AEGISSIGHT_URL=\\\${AEGISSIGHT_URL:-${serverUrl}}" > .env
 echo "AGENT_ID=$AGENT_ID" >> .env
 echo "AGENT_TOKEN=$AGENT_TOKEN" >> .env
 
-echo "Install complete! Run locally with: node /opt/aegissight-agent/agent.js"
+NODE_PATH=\\$(command -v node || echo "/usr/bin/node")
+
+if [ "\\$EUID" -ne 0 ]; then
+  echo "Warning: Not running as root. Skipping Systemd service registration."
+  echo "Install complete! Run locally with: node /opt/aegissight-agent/agent.js"
+elif ! command -v systemctl &>/dev/null; then
+  echo "Warning: systemctl not found. Skipping Systemd service registration."
+  echo "Install complete! Run locally with: node /opt/aegissight-agent/agent.js"
+else
+  echo "Registering Systemd service (aegissight-agent.service)..."
+  cat > /etc/systemd/system/aegissight-agent.service <<EOF
+[Unit]
+Description=AegisSight Backup Agent
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/aegissight-agent
+ExecStart=\\$NODE_PATH /opt/aegissight-agent/agent.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable aegissight-agent
+  systemctl start aegissight-agent
+  echo "✓ AegisSight Agent registered and started successfully as a Systemd service!"
+  echo "To view status: systemctl status aegissight-agent"
+fi
 `;
   res.setHeader('Content-Type', 'text/x-shellscript');
   res.send(installScript);
