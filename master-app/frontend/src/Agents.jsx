@@ -188,15 +188,27 @@ export default function Agents() {
         }
         parsedSources = dbConfig;
       } else {
-        parsedSources = JSON.parse(jobForm.source_paths);
+        const rawValue = jobForm.source_paths.trim();
+        if (rawValue.startsWith('[') && rawValue.endsWith(']')) {
+          parsedSources = JSON.parse(rawValue);
+        } else {
+          parsedSources = [rawValue];
+        }
       }
 
       let parsedExcludes = [];
       if (!isDb && jobForm.exclude_paths) {
-        try {
-          parsedExcludes = JSON.parse(jobForm.exclude_paths);
-        } catch(err) {
-          throw new Error('Exclude paths must be a valid JSON array or empty like []');
+        const rawExclude = jobForm.exclude_paths.trim();
+        if (rawExclude !== '') {
+          if (rawExclude.startsWith('[') && rawExclude.endsWith(']')) {
+            try {
+              parsedExcludes = JSON.parse(rawExclude);
+            } catch(err) {
+              throw new Error('Exclude paths must be a valid JSON array or empty like []');
+            }
+          } else {
+            parsedExcludes = rawExclude.split(',').map(p => p.trim()).filter(p => p.length > 0);
+          }
         }
       }
 
